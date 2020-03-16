@@ -1,0 +1,15 @@
+opts: "../app"
+name: TEST
+FOUND IT
+entry: Entry32(
+    Entry32_ {
+        name: 0xe07,
+        value: 0x20000000,
+        size: 0x4,
+        info: 0x11,
+        other: Visibility_(
+            0x0,
+        ),
+        shndx: 0x4,
+    },
+)
