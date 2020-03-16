@@ -9,7 +9,7 @@ use xmas_elf::{
 
 #[derive(StructOpt)]
 struct Opts {
-    #[structopt(long, parse(from_os_str))]
+    #[structopt(name = "FILE", parse(from_os_str))]
     elf: PathBuf,
 }
 
