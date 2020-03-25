@@ -1,10 +1,6 @@
 use probe_rs::{
-    flash::{
-        download::{download_file_with_progress_reporting, Format},
-        progress::FlashProgress,
-    },
-    Probe,
-    WireProtocol,
+    flashing::{download_file_with_options, DownloadOptions, FlashProgress, Format},
+    Probe, WireProtocol,
 };
 use std::path::Path;
 
@@ -28,19 +24,24 @@ fn main() -> Result<(), probe_rs::Error> {
     let mm = session.memory_map();
     println!("memory map: {:#x?}", mm);
 
-    download_file_with_progress_reporting(
+    download_file_with_options(
         &session,
-        Path::new("../app"),
+        Path::new("../minimal_program/target/thumbv7em-none-eabihf/release/app"),
         Format::Elf,
-        &mm,
-        &FlashProgress::new(|event| println!("event: {:#?}", event))
-    ).unwrap();
+        DownloadOptions {
+            progress: Some(&FlashProgress::new(|event| {
+                println!("event: {:#?}", event);
+            })),
+            keep_unwritten_bytes: false,
+        },
+    )
+    .unwrap();
 
     let core = session.attach_to_core(0)?;
     // println!("core: {:#?}", core);
 
     // Halt the attached core.
-    core.halt()?;
+    // core.halt()?;
 
     // Read a single 32 bit word.
     let word = core.read_word_32(0x2000_0000)?;

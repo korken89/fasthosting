@@ -10,5 +10,4 @@ edition = "2018"
 #probe-rs = "*"
 
 [dependencies.probe-rs]
-# path = "../../probe-rs/probe-rs"
 path = "../../probe-rs/probe-rs"
