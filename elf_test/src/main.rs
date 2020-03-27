@@ -14,6 +14,17 @@ struct Opts {
     elf: PathBuf,
 }
 
+struct TypePrinter {
+    size: usize,
+    alignment: usize,
+
+    // ... how to do this part?
+    //
+    // NextStep(printer or deeper nested type)
+    //
+    // printer: Vec<ByteRange, Printer>
+}
+
 fn main() -> Result<(), anyhow::Error> {
     let opts = Opts::from_args();
     println!("opts: {:#?}", opts.elf);
@@ -59,7 +70,7 @@ fn main() -> Result<(), anyhow::Error> {
         let mut entries = unit.entries();
         while let Some((delta_depth, entry)) = entries.next_dfs()? {
             depth += delta_depth;
-            println!("<{}><{:x}> {}", depth, entry.offset().0, entry.tag());
+            println!("<depth: {}><{:x}> {}", depth, entry.offset().0, entry.tag());
 
             // Iterate over the attributes in the DIE.
             let mut attrs = entry.attrs();
@@ -73,7 +84,7 @@ fn main() -> Result<(), anyhow::Error> {
                         }
                     }
                 } else {
-                    println!("   {}: {:?}", attr.name(), attr.value());
+                    println!("   {}: {:x?}", attr.name(), attr.value());
                 }
             }
         }

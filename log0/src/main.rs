@@ -24,7 +24,7 @@ fn main() -> Result<(), probe_rs::Error> {
     let mm = session.memory_map();
     println!("memory map: {:#x?}", mm);
 
-    download_file_with_options(
+    let res = download_file_with_options(
         &session,
         Path::new("../minimal_program/target/thumbv7em-none-eabihf/release/app"),
         Format::Elf,
@@ -34,8 +34,9 @@ fn main() -> Result<(), probe_rs::Error> {
             })),
             keep_unwritten_bytes: false,
         },
-    )
-    .unwrap();
+    );
+
+    println!("res: {:#?}", res);
 
     let core = session.attach_to_core(0)?;
     // println!("core: {:#?}", core);

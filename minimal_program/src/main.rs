@@ -13,18 +13,32 @@ pub mod mod1 {
     }
 }
 
+enum MyEnum {
+    Var1,
+    Var2((u8, f32)),
+    Var3,
+}
+
 use cortex_m_rt::entry;
 use cortex_m_semihosting::hprintln;
 use panic_halt as _;
 use stm32l4xx_hal as _;
 
-static mut TEST: mod1::mod2::MyStruct = mod1::mod2::MyStruct {
+static mut TEST1: mod1::mod2::MyStruct = mod1::mod2::MyStruct {
     a: 1.0,
     b: 2,
     c: 3,
     d: 4,
     e: &"test test",
 };
+
+static mut TEST2: (f32, u32, &str) = (1.0, 2, &"test test");
+
+static mut TEST3: MyEnum = MyEnum::Var2((1, 2.0));
+
+static mut TEST4: f32 = 3.0;
+
+static mut TEST5: () = ();
 
 unsafe fn any_to_byte_slice<T>(data: &T) -> &[u8] {
     core::slice::from_raw_parts(data as *const _ as *const _, core::mem::size_of::<T>())
@@ -68,7 +82,7 @@ union Transmute<T: Copy, U: Copy> {
 fn init() -> ! {
     // TODO:
     //
-    // log0::info!("Look what I got: {}", &TEST);
+    // log0::info!("Look what I got: {}", &TEST1);
     //
     // expands to
     {
@@ -82,8 +96,8 @@ fn init() -> ! {
             .to
         };
 
-        let s = unsafe { get_type_str(&TEST) };
-        let v = unsafe { any_to_byte_slice(&TEST) };
+        let s = unsafe { get_type_str(&TEST1) };
+        let v = unsafe { any_to_byte_slice(&TEST1) };
 
         hprintln!(
             "Dump - sym: {:#010x}, type_str: {:#010x}, len: {}, str: {}, data: {:?}",
@@ -98,7 +112,11 @@ fn init() -> ! {
 
     loop {
         unsafe {
-            core::ptr::read_volatile(&TEST);
+            core::ptr::read_volatile(&TEST1);
+            core::ptr::read_volatile(&TEST2);
+            core::ptr::read_volatile(&TEST3);
+            core::ptr::read_volatile(&TEST4);
+            core::ptr::read_volatile(&TEST5);
         }
     }
 }
