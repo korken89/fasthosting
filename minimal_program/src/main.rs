@@ -52,6 +52,6 @@ fn init() -> ! {
 
         cortex_m::asm::delay(1_000_000);
 
-        log0_target::log!("Look what I got 2: {}", TEST4);
+        log0_target::log!("Look what I got: {}", TEST4);
     }
 }

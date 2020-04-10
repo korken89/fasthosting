@@ -10,10 +10,11 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use structopt::StructOpt;
 use xmas_elf::{
-    sections::{SectionData, SHN_LORESERVE},
+    sections::{SectionData, SHF_ALLOC, SHN_LORESERVE},
     symbol_table::Entry,
     ElfFile,
 };
+use std::fmt;
 
 #[derive(StructOpt)]
 struct Opts {
@@ -23,7 +24,7 @@ struct Opts {
 
 fn main() -> Result<(), anyhow::Error> {
     let opts = Opts::from_args();
-    println!("opts: {:#?}", opts.elf);
+    // println!("opts: {:#?}", opts.elf);
 
     // Get address of cursors
     let bytes = fs::read(&opts.elf)?;
@@ -33,6 +34,9 @@ fn main() -> Result<(), anyhow::Error> {
     let mut buf_address = None;
 
     let sections = get_sections(elf);
+
+    // println!("sections: {:#?}", sections);
+
     let mut map_strings: HashMap<usize, &str> = HashMap::new();
     let mut map_types: HashMap<usize, &str> = HashMap::new();
 
@@ -320,6 +324,16 @@ struct Section<'a> {
     name: &'a str,
 }
 
+impl<'a> fmt::Debug for Section<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Section")
+         .field("name", &self.name)
+         .field("address", &self.address)
+         .field("bytes", &format_args!("_"))
+         .finish()
+    }
+}
+
 fn get_sections<'a>(elf: &'a ElfFile) -> Vec<Section<'a>> {
     let mut sections = Vec::new();
 
@@ -334,7 +348,7 @@ fn get_sections<'a>(elf: &'a ElfFile) -> Vec<Section<'a>> {
                 }
 
                 let align = std::mem::size_of::<u32>() as u64;
-                if address % align != 0 || size % align != 0 {
+                if address % align != 0 {
                     continue;
                 }
 
