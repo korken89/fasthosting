@@ -16,15 +16,6 @@ pub union Transmute<T: Copy, U: Copy> {
     pub to: U,
 }
 
-// const TN: &'static str = "my string that can be a type";
-//
-// static S: [u8; TN.as_bytes().len()] = unsafe {
-//     *Transmute::<*const [u8; TN.len()], &[u8; TN.as_bytes().len()]> {
-//         from: TN.as_ptr() as *const [u8; TN.as_bytes().len()],
-//     }
-//     .to
-// };
-
 use core::cell::Cell;
 
 const LOG0_CAPACITY: usize = 1024;
@@ -59,16 +50,16 @@ impl Cursors {
             - (self.target.get() - self.host.get() + LOG0_CAPACITY) % LOG0_CAPACITY;
         let len = data.len() + 8;
 
-        if free >= len {
-            for b in &(len as u16).to_ne_bytes() {
+        if free >= len + 2 {
+            for b in &(len as u16).to_le_bytes() {
                 self.push(*b);
             }
 
-            for b in &(sym as u32).to_ne_bytes() {
+            for b in &(sym as u32).to_le_bytes() {
                 self.push(*b);
             }
 
-            for b in &(type_str as u32).to_ne_bytes() {
+            for b in &(type_str as u32).to_le_bytes() {
                 self.push(*b);
             }
 
