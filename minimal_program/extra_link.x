@@ -1,6 +1,6 @@
 SECTIONS {
-  .crapsection (INFO) :
+  .fasthosting 0 (INFO) :
   {
-    *(.crapsection .crapsection.*);
+    *(.fasthosting .fasthosting.*);
   }
 }

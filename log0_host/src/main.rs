@@ -74,10 +74,10 @@ fn main() -> Result<(), anyhow::Error> {
                                 if let Ok(s) = elf.section_header(entry.shndx()) {
                                     let ev = entry.value() as usize;
                                     let es = entry.size() as usize;
-                                    if let Ok(".crapsection") = s.get_name(elf) {
+                                    if let Ok(".fasthosting") = s.get_name(elf) {
                                         let cs = sections
                                             .iter()
-                                            .find(|v| &v.name == &".crapsection")
+                                            .find(|v| &v.name == &".fasthosting")
                                             .unwrap();
 
                                         // offset for byte array

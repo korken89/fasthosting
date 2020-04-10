@@ -81,7 +81,7 @@ macro_rules! log {
 
             const FMT: &'static str = $str;
 
-            #[link_section = ".crapsection"]
+            #[link_section = ".fasthosting"]
             static S: [u8; FMT.as_bytes().len()] = unsafe {
                 *log0_target::Transmute::<*const [u8; FMT.len()], &[u8; FMT.as_bytes().len()]> {
                     from: FMT.as_ptr() as *const [u8; FMT.as_bytes().len()],
