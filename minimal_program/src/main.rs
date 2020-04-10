@@ -34,124 +34,9 @@ static mut TEST4: f32 = 3.0;
 
 static mut TEST5: () = ();
 
-unsafe fn any_to_byte_slice<T>(data: &T) -> &[u8] {
-    core::slice::from_raw_parts(data as *const _ as *const _, core::mem::size_of::<T>())
-}
-
-unsafe fn get_type_str<T>(_: &T) -> &'static str {
-    core::any::type_name::<T>()
-}
-
-// const fn test() -> [u8; 10] {
-//     const STR: &str = "asdfxcvbrt";
-//
-//     union Transmute<T: Copy, U: Copy> {
-//         from: T,
-//         to: U,
-//     }
-//
-//     unsafe {
-//         *Transmute::<*const [u8; STR.len()], &[u8; STR.len()]> {
-//             from: STR.as_ptr() as *const [u8; STR.len()],
-//         }
-//         .to
-//     }
-// }
-
-union Transmute<T: Copy, U: Copy> {
-    from: T,
-    to: U,
-}
-
-// const TN: &'static str = "my string that can be a type";
-//
-// static S: [u8; TN.as_bytes().len()] = unsafe {
-//     *Transmute::<*const [u8; TN.len()], &[u8; TN.as_bytes().len()]> {
-//         from: TN.as_ptr() as *const [u8; TN.as_bytes().len()],
-//     }
-//     .to
-// };
-
-const LOG0_CAPACITY: usize = 1024;
-
-use core::cell::Cell;
-
-#[repr(C)]
-struct Cursors {
-    target: Cell<usize>,
-    host: Cell<usize>,
-    buf: *mut u8,
-}
-
-impl Cursors {
-    fn push(&self, byte: u8) {
-        let target = self.target.get();
-        unsafe { self.buf.add(target).write(byte) }
-        self.target.set(target.wrapping_add(1) % LOG0_CAPACITY);
-    }
-
-    fn write_frame(&self, sym: *const u8, type_str: *const u8, data: &[u8]) {
-        let free = LOG0_CAPACITY
-            - 1
-            - (self.target.get() - self.host.get() + LOG0_CAPACITY) % LOG0_CAPACITY;
-        let len = data.len() + 8;
-
-        if free >= len {
-            for b in &(sym as u32).to_ne_bytes() {
-                self.push(*b);
-            }
-
-            for b in &(type_str as u32).to_ne_bytes() {
-                self.push(*b);
-            }
-
-            for b in data {
-                self.push(*b);
-            }
-        }
-    }
-}
-
-#[no_mangle]
-static mut LOG0_CURSORS: Cursors = Cursors {
-    target: Cell::new(0),
-    host: Cell::new(0),
-    buf: unsafe { &mut LOG0_BUFFER as *const _ as *mut u8 },
-};
-
-#[no_mangle]
-static mut LOG0_BUFFER: [u8; LOG0_CAPACITY] = [0; LOG0_CAPACITY];
 
 #[entry]
 fn init() -> ! {
-    // TODO:
-    //
-    // log0::info!("Look what I got: {}", &TEST1);
-    //
-    // expands to
-
-    const FMT: &'static str = "Look what I got: {}";
-
-    #[link_section = ".crapsection"]
-    static S: [u8; FMT.as_bytes().len()] = unsafe {
-        *Transmute::<*const [u8; FMT.len()], &[u8; FMT.as_bytes().len()]> {
-            from: FMT.as_ptr() as *const [u8; FMT.as_bytes().len()],
-        }
-        .to
-    };
-
-    let s = unsafe { get_type_str(&TEST1) };
-    let v = unsafe { any_to_byte_slice(&TEST1) };
-
-    // hprintln!(
-    //     "Dump - sym: {:#010x}, type_str: {:#010x}, len: {}, str: {}, data: {:?}",
-    //     &S as *const _ as usize,
-    //     s.as_ptr() as *const _ as usize,
-    //     s.len(),
-    //     s,
-    //     v
-    // )
-    // .ok();
 
     loop {
         unsafe {
@@ -160,14 +45,13 @@ fn init() -> ! {
             core::ptr::read_volatile(&TEST3);
             core::ptr::read_volatile(&TEST4);
             core::ptr::read_volatile(&TEST5);
-            core::ptr::read_volatile(&LOG0_CURSORS);
         }
         cortex_m::asm::delay(1_000_000);
 
-        unsafe {
-            LOG0_CURSORS.write_frame(&S as *const _, s.as_ptr() as *const _, v);
-            // let val = LOG0_CURSORS.target.get();
-            // LOG0_CURSORS.target.set(val + 1);
-        }
+        log0_target::log!("Look what I got: {}", TEST1);
+
+        cortex_m::asm::delay(1_000_000);
+
+        log0_target::log!("Look what I got 2: {}", TEST4);
     }
 }
