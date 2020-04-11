@@ -34,6 +34,8 @@ static mut TEST4: f32 = 3.0;
 
 static mut TEST5: () = ();
 
+static mut TEST6: [u8; 13] = [0; 13];
+
 
 #[entry]
 fn init() -> ! {
@@ -45,6 +47,7 @@ fn init() -> ! {
             core::ptr::read_volatile(&TEST3);
             core::ptr::read_volatile(&TEST4);
             core::ptr::read_volatile(&TEST5);
+            core::ptr::read_volatile(&TEST6);
         }
         cortex_m::asm::delay(1_000_000);
 

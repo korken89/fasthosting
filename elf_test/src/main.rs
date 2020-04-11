@@ -27,26 +27,8 @@ struct TypePrinter {
     // printer: Vec<ByteRange, Printer>
 }
 
-enum FakeTypes {
-    U8(u8),
-    U16(u16),
-    U32(u32),
-    U64(u64),
-}
-
 trait Print {
     fn print(&self);
-}
-
-pub trait ExtRange<T> {
-    // Returns true if 2 ranges are overlapping
-    fn is_overlapping(&self, other: &Range<T>) -> bool;
-}
-
-impl ExtRange<usize> for Range<usize> {
-    fn is_overlapping(&self, other: &Range<usize>) -> bool {
-        self.start.max(other.start) <= self.end.min(other.end)
-    }
 }
 
 impl Print for FakeTypes {
@@ -60,6 +42,14 @@ impl Print for FakeTypes {
         }
     }
 }
+
+enum FakeTypes {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+}
+
 
 enum Node<'a> {
     Leaf(&'a str, Box<MyTree<'a>>),
@@ -110,102 +100,102 @@ fn main() -> Result<(), anyhow::Error> {
     let opts = Opts::from_args();
     println!("opts: {:#?}", opts.elf);
 
-    let mut tree = MyTree::new();
-    tree.add_type("a".into(), FakeTypes::U8(1));
+    // let mut tree = MyTree::new();
+    // tree.add_type("a".into(), FakeTypes::U8(1));
 
-    let mut tree2 = MyTree::new();
-    tree2.add_type("a2".into(), FakeTypes::U16(92));
+    // let mut tree2 = MyTree::new();
+    // tree2.add_type("a2".into(), FakeTypes::U16(92));
 
-    let mut tree3 = MyTree::new();
-    tree3.add_type("a3".into(), FakeTypes::U16(12));
-    tree3.add_type("b3".into(), FakeTypes::U32(7));
-    tree2.add_leaf("tree2".into(), tree3);
+    // let mut tree3 = MyTree::new();
+    // tree3.add_type("a3".into(), FakeTypes::U16(12));
+    // tree3.add_type("b3".into(), FakeTypes::U32(7));
+    // tree2.add_leaf("tree2".into(), tree3);
 
-    tree2.add_type("b2".into(), FakeTypes::U32(93));
+    // tree2.add_type("b2".into(), FakeTypes::U32(93));
 
-    tree.add_leaf("tree".into(), tree2);
+    // tree.add_leaf("tree".into(), tree2);
 
-    tree.add_type("b".into(), FakeTypes::U16(2));
-    tree.add_type("c".into(), FakeTypes::U32(3));
-    tree.add_type("d".into(), FakeTypes::U64(4));
+    // tree.add_type("b".into(), FakeTypes::U16(2));
+    // tree.add_type("c".into(), FakeTypes::U32(3));
+    // tree.add_type("d".into(), FakeTypes::U64(4));
 
-    tree.print(&[]);
+    // tree.print(&[]);
 
     // std::process::exit(0);
 
-    // let bytes = fs::read(opts.elf)?;
-    // let elf = &ElfFile::new(&bytes).map_err(anyhow::Error::msg)?;
-    // let endian = match elf.header.pt1.data() {
-    //     xmas_elf::header::Data::BigEndian => gimli::RunTimeEndian::Big,
-    //     xmas_elf::header::Data::LittleEndian => gimli::RunTimeEndian::Little,
-    //     _ => panic!("Unknown endian"),
-    // };
+    let bytes = fs::read(opts.elf)?;
+    let elf = &ElfFile::new(&bytes).map_err(anyhow::Error::msg)?;
+    let endian = match elf.header.pt1.data() {
+        xmas_elf::header::Data::BigEndian => gimli::RunTimeEndian::Big,
+        xmas_elf::header::Data::LittleEndian => gimli::RunTimeEndian::Little,
+        _ => panic!("Unknown endian"),
+    };
 
-    // // Load a section and return as `Cow<[u8]>`.
-    // let load_section = |id: gimli::SectionId| -> Result<&[u8], gimli::Error> {
-    //     if let Some(section) = elf.find_section_by_name(id.name()) {
-    //         Ok(section.raw_data(&elf))
-    //     } else {
-    //         Ok(&[][..])
-    //     }
-    // };
+    // Load a section and return as `Cow<[u8]>`.
+    let load_section = |id: gimli::SectionId| -> Result<&[u8], gimli::Error> {
+        if let Some(section) = elf.find_section_by_name(id.name()) {
+            Ok(section.raw_data(&elf))
+        } else {
+            Ok(&[][..])
+        }
+    };
 
-    // // Load a supplementary section. We don't have a supplementary object file,
-    // // so always return an empty slice.
-    // let load_section_sup = |_| Ok(&[][..]);
+    // Load a supplementary section. We don't have a supplementary object file,
+    // so always return an empty slice.
+    let load_section_sup = |_| Ok(&[][..]);
 
-    // // Load all of the sections.
-    // let dwarf = gimli::Dwarf::load(&load_section, &load_section_sup)?;
+    // Load all of the sections.
+    let dwarf = gimli::Dwarf::load(&load_section, &load_section_sup)?;
 
-    // // Borrow a `Cow<[u8]>` to create an `EndianSlice`.
-    // let borrow_section = |&section| gimli::EndianSlice::new(section, endian);
+    // Borrow a `Cow<[u8]>` to create an `EndianSlice`.
+    let borrow_section = |&section| gimli::EndianSlice::new(section, endian);
 
-    // // Create `EndianSlice`s for all of the sections.
-    // let dwarf = dwarf.borrow(borrow_section);
+    // Create `EndianSlice`s for all of the sections.
+    let dwarf = dwarf.borrow(borrow_section);
 
-    // // Iterate over the compilation units.
-    // let mut iter = dwarf.units();
-    // while let Some(header) = iter.next()? {
-    //     println!("Unit at <.debug_info+0x{:x}>", header.offset().0);
-    //     let unit = dwarf.unit(header)?;
+    // Iterate over the compilation units.
+    let mut iter = dwarf.units();
+    while let Some(header) = iter.next()? {
+        println!("Unit at <.debug_info+0x{:x}>", header.offset().0);
+        let unit = dwarf.unit(header)?;
 
-    //     // Iterate over the Debugging Information Entries (DIEs) in the unit.
-    //     let mut depth = 0;
-    //     let mut entries = unit.entries();
-    //     while let Some((delta_depth, entry)) = entries.next_dfs()? {
-    //         depth += delta_depth;
-    //         println!("<depth: {}><{:x}> {}", depth, entry.offset().0, entry.tag());
+        // Iterate over the Debugging Information Entries (DIEs) in the unit.
+        let mut depth = 0;
+        let mut entries = unit.entries();
+        while let Some((delta_depth, entry)) = entries.next_dfs()? {
+            depth += delta_depth;
+            println!("<depth: {}><{:x}> {}", depth, entry.offset().0, entry.tag());
 
-    //         if entry.tag() == gimli::constants::DW_TAG_namespace {
-    //             let namespace = if let gimli::read::AttributeValue::DebugStrRef(r) =
-    //                 entry.attrs().next()?.unwrap().value()
-    //             {
-    //                 rustc_demangle::demangle(dwarf.string(r).unwrap().to_string().unwrap())
-    //                     .to_string()
-    //             } else {
-    //                 panic!("error")
-    //             };
+            if entry.tag() == gimli::constants::DW_TAG_namespace {
+                let namespace = if let gimli::read::AttributeValue::DebugStrRef(r) =
+                    entry.attrs().next()?.unwrap().value()
+                {
+                    rustc_demangle::demangle(dwarf.string(r).unwrap().to_string().unwrap())
+                        .to_string()
+                } else {
+                    panic!("error")
+                };
 
-    //             println!(">>>>>>>>> namespace - {}", namespace);
-    //         }
+                println!(">>>>>>>>> namespace - {}", namespace);
+            }
 
-    //         // Iterate over the attributes in the DIE.
-    //         let mut attrs = entry.attrs();
-    //         while let Some(attr) = attrs.next()? {
-    //             if attr.name() == gimli::constants::DW_AT_name {
-    //                 if let gimli::read::AttributeValue::DebugStrRef(r) = attr.value() {
-    //                     if let Ok(s) = dwarf.string(r) {
-    //                         if let Ok(s) = s.to_string() {
-    //                             println!("   {}: {}", attr.name(), s);
-    //                         }
-    //                     }
-    //                 }
-    //             } else {
-    //                 println!("   {}: {:x?}", attr.name(), attr.value());
-    //             }
-    //         }
-    //     }
-    // }
+            // Iterate over the attributes in the DIE.
+            let mut attrs = entry.attrs();
+            while let Some(attr) = attrs.next()? {
+                if attr.name() == gimli::constants::DW_AT_name {
+                    if let gimli::read::AttributeValue::DebugStrRef(r) = attr.value() {
+                        if let Ok(s) = dwarf.string(r) {
+                            if let Ok(s) = s.to_string() {
+                                println!("   {}: {}", attr.name(), s);
+                            }
+                        }
+                    }
+                } else {
+                    println!("   {}: {:x?}", attr.name(), attr.value());
+                }
+            }
+        }
+    }
 
     // for sect in elf.section_iter() {
     //     if sect.flags() & SHF_ALLOC != 0 {
