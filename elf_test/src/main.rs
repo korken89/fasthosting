@@ -1,5 +1,6 @@
 use gimli as _;
 use std::fs;
+use std::ops::Range;
 use std::path::PathBuf;
 use structopt::StructOpt;
 use xmas_elf::{
@@ -37,6 +38,17 @@ trait Print {
     fn print(&self);
 }
 
+pub trait ExtRange<T> {
+    // Returns true if 2 ranges are overlapping
+    fn is_overlapping(&self, other: &Range<T>) -> bool;
+}
+
+impl ExtRange<usize> for Range<usize> {
+    fn is_overlapping(&self, other: &Range<usize>) -> bool {
+        self.start.max(other.start) <= self.end.min(other.end)
+    }
+}
+
 impl Print for FakeTypes {
     fn print(&self) {
         match self {
@@ -49,25 +61,25 @@ impl Print for FakeTypes {
     }
 }
 
-enum Node {
-    Leaf(String, Box<MyTree>),
-    Type(String, FakeTypes),
+enum Node<'a> {
+    Leaf(&'a str, Box<MyTree<'a>>),
+    Type(&'a str, FakeTypes),
 }
 
-struct MyTree {
-    nodes: Vec<Node>,
+struct MyTree<'a> {
+    nodes: Vec<Node<'a>>,
 }
 
-impl MyTree {
+impl<'a> MyTree<'a> {
     pub fn new() -> Self {
         MyTree { nodes: Vec::new() }
     }
 
-    pub fn add_type(&mut self, name: String, t: FakeTypes) {
+    pub fn add_type(&mut self, name: &'a str, t: FakeTypes) {
         self.nodes.push(Node::Type(name, t));
     }
 
-    pub fn add_leaf(&mut self, name: String, l: MyTree) {
+    pub fn add_leaf(&mut self, name: &'a str, l: MyTree<'a>) {
         self.nodes.push(Node::Leaf(name, l.into()));
     }
 
@@ -98,31 +110,31 @@ fn main() -> Result<(), anyhow::Error> {
     let opts = Opts::from_args();
     println!("opts: {:#?}", opts.elf);
 
-    // let mut tree = MyTree::new();
-    // tree.add_type("a".into(), FakeTypes::U8(1));
+    let mut tree = MyTree::new();
+    tree.add_type("a".into(), FakeTypes::U8(1));
 
-    // let mut tree2 = MyTree::new();
-    // tree2.add_type("a2".into(), FakeTypes::U16(92));
+    let mut tree2 = MyTree::new();
+    tree2.add_type("a2".into(), FakeTypes::U16(92));
 
-    // let mut tree3 = MyTree::new();
-    // tree3.add_type("a3".into(), FakeTypes::U16(12));
-    // tree3.add_type("b3".into(), FakeTypes::U32(7));
-    // tree2.add_leaf("tree2".into(), tree3);
+    let mut tree3 = MyTree::new();
+    tree3.add_type("a3".into(), FakeTypes::U16(12));
+    tree3.add_type("b3".into(), FakeTypes::U32(7));
+    tree2.add_leaf("tree2".into(), tree3);
 
-    // tree2.add_type("b2".into(), FakeTypes::U32(93));
+    tree2.add_type("b2".into(), FakeTypes::U32(93));
 
-    // tree.add_leaf("tree".into(), tree2);
+    tree.add_leaf("tree".into(), tree2);
 
-    // tree.add_type("b".into(), FakeTypes::U16(2));
-    // tree.add_type("c".into(), FakeTypes::U32(3));
-    // tree.add_type("d".into(), FakeTypes::U64(4));
+    tree.add_type("b".into(), FakeTypes::U16(2));
+    tree.add_type("c".into(), FakeTypes::U32(3));
+    tree.add_type("d".into(), FakeTypes::U64(4));
 
-    // tree.print();
+    tree.print(&[]);
 
     // std::process::exit(0);
 
-    let bytes = fs::read(opts.elf)?;
-    let elf = &ElfFile::new(&bytes).map_err(anyhow::Error::msg)?;
+    // let bytes = fs::read(opts.elf)?;
+    // let elf = &ElfFile::new(&bytes).map_err(anyhow::Error::msg)?;
     // let endian = match elf.header.pt1.data() {
     //     xmas_elf::header::Data::BigEndian => gimli::RunTimeEndian::Big,
     //     xmas_elf::header::Data::LittleEndian => gimli::RunTimeEndian::Little,
@@ -195,33 +207,33 @@ fn main() -> Result<(), anyhow::Error> {
     //     }
     // }
 
-    for sect in elf.section_iter() {
-        if sect.flags() & SHF_ALLOC != 0 {
-            println!("alloc section: {:?}", sect.get_name(elf));
-        } else {
-            println!("not alloc section: {:?}", sect.get_name(elf));
-        }
+    // for sect in elf.section_iter() {
+    //     if sect.flags() & SHF_ALLOC != 0 {
+    //         println!("alloc section: {:?}", sect.get_name(elf));
+    //     } else {
+    //         println!("not alloc section: {:?}", sect.get_name(elf));
+    //     }
 
-        if sect.get_name(elf) == Ok(".symtab") {
-            if let Ok(symtab) = sect.get_data(elf) {
-                if let SectionData::SymbolTable32(entries) = symtab {
-                    for entry in entries {
-                        if let Ok(name) = entry.get_name(elf) {
-                            // println!("names: {}", rustc_demangle::demangle(name).to_string());
-                            if name == "LOG0_CURSORS" {
-                                println!(
-                                    "        Found '{}', address = 0x{:8x}, size = {}b",
-                                    name,
-                                    entry.value(),
-                                    entry.size()
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    //     if sect.get_name(elf) == Ok(".symtab") {
+    //         if let Ok(symtab) = sect.get_data(elf) {
+    //             if let SectionData::SymbolTable32(entries) = symtab {
+    //                 for entry in entries {
+    //                     if let Ok(name) = entry.get_name(elf) {
+    //                         // println!("names: {}", rustc_demangle::demangle(name).to_string());
+    //                         if name == "LOG0_CURSORS" {
+    //                             println!(
+    //                                 "        Found '{}', address = 0x{:8x}, size = {}b",
+    //                                 name,
+    //                                 entry.value(),
+    //                                 entry.size()
+    //                             );
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     Ok(())
 }
