@@ -43,8 +43,8 @@ impl BaseType {
 
     /// Print buffer as base-type
     pub fn print(&self, w: &mut impl Write, buf: &[u8]) -> std::io::Result<()> {
-        use BaseType::*;
         use BaseEncoding::*;
+        use BaseType::*;
         match self {
             U8(Decimal) => {
                 assert!(buf.len() == 1);
@@ -172,10 +172,10 @@ pub struct TypePrinter<'a> {
 
 impl<'a> TypePrinter<'a> {
     pub fn print(&self, w: &mut impl Write) -> std::io::Result<()> {
-        self.printer.print(w, &self.buf.get(self.range.clone()).unwrap())
+        self.printer
+            .print(w, &self.buf.get(self.range.clone()).unwrap())
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -205,17 +205,17 @@ mod tests {
         let printer = TypePrinter {
             range: 0..1,
             printer: Printer::Single(BaseType::U8(BaseEncoding::Decimal)),
-            buf
+            buf,
         };
         let printer2 = TypePrinter {
             range: 0..2,
             printer: Printer::Single(BaseType::U16(BaseEncoding::Hex)),
-            buf
+            buf,
         };
         let printer3 = TypePrinter {
             range: 0..4,
             printer: Printer::Single(BaseType::U32(BaseEncoding::Hex)),
-            buf
+            buf,
         };
 
         println!();

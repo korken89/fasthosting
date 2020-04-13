@@ -50,7 +50,6 @@ enum FakeTypes {
     U64(u64),
 }
 
-
 enum Node<'a> {
     Leaf(&'a str, Box<MyTree<'a>>),
     Type(&'a str, FakeTypes),
@@ -155,6 +154,8 @@ fn main() -> Result<(), anyhow::Error> {
 
     // Iterate over the compilation units.
     let mut iter = dwarf.units();
+    let mut namespace = Vec::new();
+    let mut namespace_depth = 0;
     while let Some(header) = iter.next()? {
         println!("Unit at <.debug_info+0x{:x}>", header.offset().0);
         let unit = dwarf.unit(header)?;
@@ -166,17 +167,33 @@ fn main() -> Result<(), anyhow::Error> {
             depth += delta_depth;
             println!("<depth: {}><{:x}> {}", depth, entry.offset().0, entry.tag());
 
+            if depth < namespace_depth {
+                for _ in 0..=namespace_depth - depth {
+                    namespace.pop();
+                }
+
+                namespace_depth = depth;
+            }
+
             if entry.tag() == gimli::constants::DW_TAG_namespace {
-                let namespace = if let gimli::read::AttributeValue::DebugStrRef(r) =
+                let namespace_str = if let gimli::read::AttributeValue::DebugStrRef(r) =
                     entry.attrs().next()?.unwrap().value()
                 {
                     rustc_demangle::demangle(dwarf.string(r).unwrap().to_string().unwrap())
-                        .to_string()
                 } else {
                     panic!("error")
                 };
 
-                println!(">>>>>>>>> namespace - {}", namespace);
+                namespace.push(namespace_str.to_string());
+                namespace_depth = depth;
+            }
+
+            if entry.tag().is_type() {
+                println!(
+                    ">>>>>>>>> type - in {}, depth = {}",
+                    namespace.join("::"),
+                    namespace_depth
+                );
             }
 
             // Iterate over the attributes in the DIE.
@@ -226,4 +243,23 @@ fn main() -> Result<(), anyhow::Error> {
     // }
 
     Ok(())
+}
+
+trait DwTagExt {
+    fn is_type(&self) -> bool;
+}
+
+impl DwTagExt for gimli::DwTag {
+    fn is_type(&self) -> bool {
+        use gimli::constants as c;
+        match *self {
+            c::DW_TAG_structure_type
+            | c::DW_TAG_union_type
+            | c::DW_TAG_array_type
+            | c::DW_TAG_base_type
+            | c::DW_TAG_reference_type
+            | c::DW_TAG_string_type => true,
+            _ => false,
+        }
+    }
 }
