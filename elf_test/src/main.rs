@@ -50,26 +50,26 @@ enum FakeTypes {
     U64(u64),
 }
 
-enum Node<'a> {
-    Leaf(&'a str, Box<MyTree<'a>>),
-    Type(&'a str, FakeTypes),
+enum TypeNode<'a> {
+    Branch(&'a str, Box<TypeTree<'a>>),
+    Leaf(&'a str, FakeTypes),
 }
 
-struct MyTree<'a> {
-    nodes: Vec<Node<'a>>,
+struct TypeTree<'a> {
+    nodes: Vec<TypeNode<'a>>,
 }
 
-impl<'a> MyTree<'a> {
+impl<'a> TypeTree<'a> {
     pub fn new() -> Self {
-        MyTree { nodes: Vec::new() }
+        TypeTree { nodes: Vec::new() }
     }
 
-    pub fn add_type(&mut self, name: &'a str, t: FakeTypes) {
-        self.nodes.push(Node::Type(name, t));
+    pub fn add_leaf(&mut self, name: &'a str, t: FakeTypes) {
+        self.nodes.push(TypeNode::Leaf(name, t));
     }
 
-    pub fn add_leaf(&mut self, name: &'a str, l: MyTree<'a>) {
-        self.nodes.push(Node::Leaf(name, l.into()));
+    pub fn add_branch(&mut self, name: &'a str, l: TypeTree<'a>) {
+        self.nodes.push(TypeNode::Branch(name, l.into()));
     }
 
     pub fn print(&self, buf: &[u8]) {
@@ -80,12 +80,12 @@ impl<'a> MyTree<'a> {
         let pad = " ".repeat(depth * 4);
         for v in &self.nodes {
             match v {
-                Node::Leaf(n, t) => {
+                TypeNode::Branch(n, t) => {
                     println!("{}{}: {{", &pad, n);
                     t.print_internal(depth + 1);
                     println!("{}}},", &pad);
                 }
-                Node::Type(n, t) => {
+                TypeNode::Leaf(n, t) => {
                     print!("{}{}: ", &pad, n);
                     t.print();
                     println!(",");
@@ -99,24 +99,24 @@ fn main() -> Result<(), anyhow::Error> {
     let opts = Opts::from_args();
     println!("opts: {:#?}", opts.elf);
 
-    // let mut tree = MyTree::new();
-    // tree.add_type("a".into(), FakeTypes::U8(1));
+    // let mut tree = TypeTree::new();
+    // tree.add_leaf("a".into(), FakeTypes::U8(1));
 
-    // let mut tree2 = MyTree::new();
-    // tree2.add_type("a2".into(), FakeTypes::U16(92));
+    // let mut tree2 = TypeTree::new();
+    // tree2.add_leaf("a2".into(), FakeTypes::U16(92));
 
-    // let mut tree3 = MyTree::new();
-    // tree3.add_type("a3".into(), FakeTypes::U16(12));
-    // tree3.add_type("b3".into(), FakeTypes::U32(7));
-    // tree2.add_leaf("tree2".into(), tree3);
+    // let mut tree3 = TypeTree::new();
+    // tree3.add_leaf("a3".into(), FakeTypes::U16(12));
+    // tree3.add_leaf("b3".into(), FakeTypes::U32(7));
+    // tree2.add_branch("tree2".into(), tree3);
 
-    // tree2.add_type("b2".into(), FakeTypes::U32(93));
+    // tree2.add_leaf("b2".into(), FakeTypes::U32(93));
 
-    // tree.add_leaf("tree".into(), tree2);
+    // tree.add_branch("tree".into(), tree2);
 
-    // tree.add_type("b".into(), FakeTypes::U16(2));
-    // tree.add_type("c".into(), FakeTypes::U32(3));
-    // tree.add_type("d".into(), FakeTypes::U64(4));
+    // tree.add_leaf("b".into(), FakeTypes::U16(2));
+    // tree.add_leaf("c".into(), FakeTypes::U32(3));
+    // tree.add_leaf("d".into(), FakeTypes::U64(4));
 
     // tree.print(&[]);
 
@@ -160,6 +160,13 @@ fn main() -> Result<(), anyhow::Error> {
         println!("Unit at <.debug_info+0x{:x}>", header.offset().0);
         let unit = dwarf.unit(header)?;
 
+
+        // TODO:
+        //
+        // Pass 1: Extract base types
+        // Pass 2: Extract complex types that resolve into trees with base types as leafs
+
+
         // Iterate over the Debugging Information Entries (DIEs) in the unit.
         let mut depth = 0;
         let mut entries = unit.entries();
@@ -188,9 +195,17 @@ fn main() -> Result<(), anyhow::Error> {
                 namespace_depth = depth;
             }
 
-            if entry.tag().is_type() {
+            if entry.tag().is_base_type() {
+                // If we are tracking a complex type, add base type to it
+                //
+                // Type that we want to record has been found!!! Encode it in a printer tree for
+                // later use
+                println!(">>>>>>>>> base type, depth = {}", namespace_depth);
+            } else if entry.tag().is_complex_type() {
+                // Type that we want to record has been found!!! Encode it in a printer tree for
+                // later use
                 println!(
-                    ">>>>>>>>> type - in {}, depth = {}",
+                    ">>>>>>>>> complex type - in {}, depth = {}",
                     namespace.join("::"),
                     namespace_depth
                 );
@@ -246,17 +261,25 @@ fn main() -> Result<(), anyhow::Error> {
 }
 
 trait DwTagExt {
-    fn is_type(&self) -> bool;
+    fn is_base_type(&self) -> bool;
+    fn is_complex_type(&self) -> bool;
 }
 
 impl DwTagExt for gimli::DwTag {
-    fn is_type(&self) -> bool {
+    fn is_base_type(&self) -> bool {
+        use gimli::constants as c;
+        match *self {
+            c::DW_TAG_base_type => true,
+            _ => false,
+        }
+    }
+
+    fn is_complex_type(&self) -> bool {
         use gimli::constants as c;
         match *self {
             c::DW_TAG_structure_type
             | c::DW_TAG_union_type
             | c::DW_TAG_array_type
-            | c::DW_TAG_base_type
             | c::DW_TAG_reference_type
             | c::DW_TAG_string_type => true,
             _ => false,

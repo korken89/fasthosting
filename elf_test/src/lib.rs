@@ -1,7 +1,6 @@
 use std::convert::TryInto;
 use std::io::Write;
 use std::ops::Range;
-use std::slice::SliceIndex;
 
 /// Extension trait for `Range` to check for overlap
 pub trait ExtRange<T> {
