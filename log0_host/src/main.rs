@@ -5,8 +5,11 @@ use probe_rs::{
 };
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 use structopt::StructOpt;
 use xmas_elf::{
@@ -14,7 +17,6 @@ use xmas_elf::{
     symbol_table::Entry,
     ElfFile,
 };
-use std::fmt;
 
 #[derive(StructOpt)]
 struct Opts {
@@ -23,6 +25,14 @@ struct Opts {
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    // Ctrl-C handling
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })
+    .expect("Error setting Ctrl-C handler");
+
     let opts = Opts::from_args();
     // println!("opts: {:#?}", opts.elf);
 
@@ -36,6 +46,12 @@ fn main() -> Result<(), anyhow::Error> {
     let sections = get_sections(elf);
 
     // println!("sections: {:#?}", sections);
+
+    // -------------------------------------------------------------------
+    //
+    // Extract formating strings and type strings
+    //
+    // -------------------------------------------------------------------
 
     let mut map_strings: HashMap<usize, &str> = HashMap::new();
     let mut map_types: HashMap<usize, &str> = HashMap::new();
@@ -136,8 +152,15 @@ fn main() -> Result<(), anyhow::Error> {
         }
     }
 
+    // -------------------------------------------------------------------
+    //
+    // Setup debug probe
+    //
+    // -------------------------------------------------------------------
+
     // Get a list of all available debug probes.
     let probes = Probe::list_all();
+    println!("Probes: {:#?}", probes);
 
     // Use the first probe found.
     let mut probe = probes[0].open()?;
@@ -172,18 +195,26 @@ fn main() -> Result<(), anyhow::Error> {
     // Halt the attached core.
     // core.halt()?;
 
+    // -------------------------------------------------------------------
+    //
+    // Read from MCU
+    //
+    // -------------------------------------------------------------------
+
     // Read a single 32 bit word.
+    let cursor_address = cursor_address.expect("cursor address not found");
+    let buf_address = buf_address.expect("cursor address not found");
     let mut old_target = 0;
-    let buf_size = buf_address.unwrap().1;
+    let buf_size = buf_address.1;
     let mut read_buff = vec![0; buf_size];
     let mut parser = Parser::new();
 
-    loop {
+    while running.load(Ordering::SeqCst) {
         let mut buff = [0u32; 2];
 
         let now = Instant::now();
 
-        core.read_32(cursor_address.unwrap(), &mut buff)?;
+        core.read_32(cursor_address, &mut buff)?;
 
         let target = buff[0];
         let host = buff[1];
@@ -198,15 +229,12 @@ fn main() -> Result<(), anyhow::Error> {
             if host + br as u32 > buf_size as u32 {
                 // cursor will overflow
                 let pivot = host.wrapping_add(br as u32).wrapping_sub(buf_size as u32) as usize;
-                core.read_8(buf_address.unwrap().0 + host, &mut read[0..pivot])?;
-                core.read_8(buf_address.unwrap().0, &mut read[pivot..br])?;
-                core.write_word_32(cursor_address.unwrap() + 4, (br - pivot) as u32)?;
+                core.read_8(buf_address.0 + host, &mut read[0..pivot])?;
+                core.read_8(buf_address.0, &mut read[pivot..br])?;
+                core.write_word_32(cursor_address + 4, (br - pivot) as u32)?;
             } else {
-                core.read_8(buf_address.unwrap().0 + host, &mut read)?;
-                core.write_word_32(
-                    cursor_address.unwrap() + 4,
-                    (host + br as u32) % buf_size as u32,
-                )?;
+                core.read_8(buf_address.0 + host, &mut read)?;
+                core.write_word_32(cursor_address + 4, (host + br as u32) % buf_size as u32)?;
             }
             let _dur = now.elapsed();
 
@@ -235,6 +263,8 @@ fn main() -> Result<(), anyhow::Error> {
             // println!("read buf: {:x?}", read);
         }
     }
+
+    core.halt()?;
 
     Ok(())
 }
@@ -327,10 +357,10 @@ struct Section<'a> {
 impl<'a> fmt::Debug for Section<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Section")
-         .field("name", &self.name)
-         .field("address", &self.address)
-         .field("bytes", &format_args!("_"))
-         .finish()
+            .field("name", &self.name)
+            .field("address", &self.address)
+            .field("bytes", &format_args!("_"))
+            .finish()
     }
 }
 

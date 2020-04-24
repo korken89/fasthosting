@@ -13,6 +13,7 @@ xmas-elf = "0.7"
 anyhow = "1"
 structopt = "0.3"
 rustc-demangle = "0.1"
+ctrlc = "3.1"
 
 # [dependencies.probe-rs]
 # path = "../../probe-rs/probe-rs"

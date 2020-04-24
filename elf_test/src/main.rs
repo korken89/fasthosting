@@ -15,112 +15,9 @@ struct Opts {
     elf: PathBuf,
 }
 
-struct TypePrinter {
-    size: usize,
-    // alignment: usize,
-    // buffer: Vec<u8>,
-
-    // ... how to do this part?
-    //
-    // NextStep(printer or deeper nested type)
-    //
-    // printer: Vec<ByteRange, Printer>
-}
-
-trait Print {
-    fn print(&self);
-}
-
-impl Print for FakeTypes {
-    fn print(&self) {
-        match self {
-            Self::U8(val) => print!("{}", val),
-            Self::U16(val) => print!("{}", val),
-            Self::U32(val) => print!("{}", val),
-            Self::U64(val) => print!("{}", val),
-            _ => print!("Unknown Type"),
-        }
-    }
-}
-
-enum FakeTypes {
-    U8(u8),
-    U16(u16),
-    U32(u32),
-    U64(u64),
-}
-
-enum TypeNode<'a> {
-    Branch(&'a str, Box<TypeTree<'a>>),
-    Leaf(&'a str, FakeTypes),
-}
-
-struct TypeTree<'a> {
-    nodes: Vec<TypeNode<'a>>,
-}
-
-impl<'a> TypeTree<'a> {
-    pub fn new() -> Self {
-        TypeTree { nodes: Vec::new() }
-    }
-
-    pub fn add_leaf(&mut self, name: &'a str, t: FakeTypes) {
-        self.nodes.push(TypeNode::Leaf(name, t));
-    }
-
-    pub fn add_branch(&mut self, name: &'a str, l: TypeTree<'a>) {
-        self.nodes.push(TypeNode::Branch(name, l.into()));
-    }
-
-    pub fn print(&self, buf: &[u8]) {
-        self.print_internal(0);
-    }
-
-    fn print_internal(&self, depth: usize) {
-        let pad = " ".repeat(depth * 4);
-        for v in &self.nodes {
-            match v {
-                TypeNode::Branch(n, t) => {
-                    println!("{}{}: {{", &pad, n);
-                    t.print_internal(depth + 1);
-                    println!("{}}},", &pad);
-                }
-                TypeNode::Leaf(n, t) => {
-                    print!("{}{}: ", &pad, n);
-                    t.print();
-                    println!(",");
-                }
-            }
-        }
-    }
-}
-
 fn main() -> Result<(), anyhow::Error> {
     let opts = Opts::from_args();
     println!("opts: {:#?}", opts.elf);
-
-    // let mut tree = TypeTree::new();
-    // tree.add_leaf("a".into(), FakeTypes::U8(1));
-
-    // let mut tree2 = TypeTree::new();
-    // tree2.add_leaf("a2".into(), FakeTypes::U16(92));
-
-    // let mut tree3 = TypeTree::new();
-    // tree3.add_leaf("a3".into(), FakeTypes::U16(12));
-    // tree3.add_leaf("b3".into(), FakeTypes::U32(7));
-    // tree2.add_branch("tree2".into(), tree3);
-
-    // tree2.add_leaf("b2".into(), FakeTypes::U32(93));
-
-    // tree.add_branch("tree".into(), tree2);
-
-    // tree.add_leaf("b".into(), FakeTypes::U16(2));
-    // tree.add_leaf("c".into(), FakeTypes::U32(3));
-    // tree.add_leaf("d".into(), FakeTypes::U64(4));
-
-    // tree.print(&[]);
-
-    // std::process::exit(0);
 
     let bytes = fs::read(opts.elf)?;
     let elf = &ElfFile::new(&bytes).map_err(anyhow::Error::msg)?;
@@ -146,26 +43,20 @@ fn main() -> Result<(), anyhow::Error> {
     // Load all of the sections.
     let dwarf = gimli::Dwarf::load(&load_section, &load_section_sup)?;
 
-    // Borrow a `Cow<[u8]>` to create an `EndianSlice`.
-    let borrow_section = |&section| gimli::EndianSlice::new(section, endian);
-
     // Create `EndianSlice`s for all of the sections.
-    let dwarf = dwarf.borrow(borrow_section);
+    let dwarf = dwarf.borrow(|&section| gimli::EndianSlice::new(section, endian));
 
     // Iterate over the compilation units.
     let mut iter = dwarf.units();
     let mut namespace = Vec::new();
-    let mut namespace_depth = 0;
     while let Some(header) = iter.next()? {
         println!("Unit at <.debug_info+0x{:x}>", header.offset().0);
         let unit = dwarf.unit(header)?;
-
 
         // TODO:
         //
         // Pass 1: Extract base types
         // Pass 2: Extract complex types that resolve into trees with base types as leafs
-
 
         // Iterate over the Debugging Information Entries (DIEs) in the unit.
         let mut depth = 0;
@@ -174,12 +65,8 @@ fn main() -> Result<(), anyhow::Error> {
             depth += delta_depth;
             println!("<depth: {}><{:x}> {}", depth, entry.offset().0, entry.tag());
 
-            if depth < namespace_depth {
-                for _ in 0..=namespace_depth - depth {
-                    namespace.pop();
-                }
-
-                namespace_depth = depth;
+            while depth <= namespace.len() as isize && namespace.len() > 0 {
+                namespace.pop();
             }
 
             if entry.tag() == gimli::constants::DW_TAG_namespace {
@@ -192,7 +79,6 @@ fn main() -> Result<(), anyhow::Error> {
                 };
 
                 namespace.push(namespace_str.to_string());
-                namespace_depth = depth;
             }
 
             if entry.tag().is_base_type() {
@@ -200,14 +86,14 @@ fn main() -> Result<(), anyhow::Error> {
                 //
                 // Type that we want to record has been found!!! Encode it in a printer tree for
                 // later use
-                println!(">>>>>>>>> base type, depth = {}", namespace_depth);
+                println!(">>>>>>>>> base type, depth = {}", depth);
             } else if entry.tag().is_complex_type() {
                 // Type that we want to record has been found!!! Encode it in a printer tree for
                 // later use
                 println!(
                     ">>>>>>>>> complex type - in {}, depth = {}",
                     namespace.join("::"),
-                    namespace_depth
+                    depth
                 );
             }
 
