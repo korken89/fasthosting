@@ -1,4 +1,5 @@
 use gimli as _;
+use log0_host::{bytes_to_read, parser::Parser};
 use probe_rs::{
     flashing::{download_file_with_options, DownloadOptions, FlashProgress, Format},
     Probe, WireProtocol,
@@ -17,8 +18,6 @@ use xmas_elf::{
     ElfFile,
 };
 
-use log0_host::Parser;
-
 #[derive(StructOpt)]
 struct Opts {
     #[structopt(name = "FILE", parse(from_os_str))]
@@ -26,14 +25,6 @@ struct Opts {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    // Ctrl-C handling
-    let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
-    ctrlc::set_handler(move || {
-        r.store(false, Ordering::SeqCst);
-    })
-    .expect("Error setting Ctrl-C handler");
-
     let opts = Opts::from_args();
     // println!("opts: {:#?}", opts.elf);
 
@@ -202,6 +193,14 @@ fn main() -> Result<(), anyhow::Error> {
     //
     // -------------------------------------------------------------------
 
+    // Ctrl-C handling
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })
+    .expect("Error setting Ctrl-C handler");
+
     // Read a single 32 bit word.
     let cursor_address = cursor_address.expect("cursor address not found");
     let buf_address = buf_address.expect("cursor address not found");
@@ -224,26 +223,36 @@ fn main() -> Result<(), anyhow::Error> {
             old_target = target;
 
             let br = bytes_to_read(host as usize, target as usize, buf_size);
+            // println!("bytes to read: {}", br);
 
             let mut read = &mut read_buff[0..br];
 
             if host + br as u32 > buf_size as u32 {
                 // cursor will overflow
-                let pivot = host.wrapping_add(br as u32).wrapping_sub(buf_size as u32) as usize;
+                let pivot = buf_size - host as usize;
+                // println!(
+                //     "pivot: {}, reading from {} to {}, 0 to {}",
+                //     pivot,
+                //     host,
+                //     host + pivot as u32,
+                //     br - pivot
+                // );
                 core.read_8(buf_address.0 + host, &mut read[0..pivot])?;
                 core.read_8(buf_address.0, &mut read[pivot..br])?;
                 core.write_word_32(cursor_address + 4, (br - pivot) as u32)?;
             } else {
+                // println!("reading from {} to {}", host, host + br as u32);
                 core.read_8(buf_address.0 + host, &mut read)?;
                 core.write_word_32(cursor_address + 4, (host + br as u32) % buf_size as u32)?;
             }
+
             let _dur = now.elapsed();
 
             parser.push(&read);
 
             while let Some(p) = parser.try_parse() {
                 println!(
-                    "String: '{}', Type string: '{}', Buffer: {:?}",
+                    "String: '{}', Type string: '{}', Buffer: {:x?}",
                     map_strings
                         .get(&p.string_loc)
                         .unwrap_or(&"String not found in hashmap?!?!?!"),
@@ -252,28 +261,22 @@ fn main() -> Result<(), anyhow::Error> {
                         .unwrap_or(&"String not found in hashmap?!?!?!"),
                     p.buffer
                 );
+
+                // println!("packet: {:x?}", p);
             }
 
-            // println!(
-            //     "target: {}, host: {}, len to read: {}, read time: {:.2} ms",
-            //     target,
-            //     host,
-            //     br,
-            //     dur.as_secs_f64() * 1000.0
-            // );
+            // println!("target: {}, host: {}, len to read: {}", target, host, br,);
             // println!("read buf: {:x?}", read);
+            // println!("");
         }
     }
 
     core.halt()?;
 
+    println!("Exiting ...");
+
     Ok(())
 }
-
-fn bytes_to_read(host_idx: usize, target_idx: usize, buffer_size: usize) -> usize {
-    target_idx.wrapping_sub(host_idx).wrapping_add(buffer_size) % buffer_size
-}
-
 
 struct Section<'a> {
     address: u32,
