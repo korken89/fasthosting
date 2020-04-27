@@ -58,13 +58,12 @@ fn main() -> Result<()> {
             keep_unwritten_bytes: false,
         },
     )?;
+    let core = session.attach_to_core(0)?;
+    core.reset_and_halt()?;
+
     println!(" Done!");
 
     std::thread::sleep(std::time::Duration::from_millis(500));
-
-    let core = session.attach_to_core(0)?;
-    core.reset_and_halt()?;
-    core.run()?;
 
     // -------------------------------------------------------------------
     //
@@ -91,6 +90,8 @@ fn main() -> Result<()> {
     let mut old_target = 0;
     let mut read_buff = vec![0; buffer_size];
     let mut parser = Parser::new();
+
+    core.run()?;
 
     while running.load(Ordering::SeqCst) {
         let mut buff = [0u32; 2];
