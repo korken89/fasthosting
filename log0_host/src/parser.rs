@@ -1,6 +1,8 @@
 use crate::leb128;
 use std::collections::VecDeque;
 
+/// A parsed packet containing the addresses of the formating and type strings, as well as the
+/// transmitted buffer
 #[derive(Debug, PartialEq, Eq)]
 pub struct Packet {
     pub string_loc: usize,
@@ -8,6 +10,7 @@ pub struct Packet {
     pub buffer: Vec<u8>,
 }
 
+/// Parser worker, this handles the parsing of the binary format
 #[derive(Debug)]
 pub struct Parser {
     buf: VecDeque<u8>,
@@ -32,6 +35,7 @@ impl Parser {
         self.buf.extend(data.iter());
     }
 
+    /// Try to decode a LEB128 encoded u32 from the queue
     fn try_leb128(&mut self) -> Option<u32> {
         let slices = self.buf.as_slices();
         let data_iter = slices.0.iter().chain(slices.1.iter());

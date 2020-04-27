@@ -1,5 +1,5 @@
 fn leb128_write(v: &mut Vec<u8>, mut word: u32) {
-    loop {
+    for _ in 0..5 {
         let mut byte = (word & 0x7f) as u8;
         word >>= 7;
 
