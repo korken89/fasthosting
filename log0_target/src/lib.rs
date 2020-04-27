@@ -37,6 +37,8 @@ pub struct Cursors {
     buf: *mut u8,
 }
 
+const CONTINUE: u8 = 1 << 7;
+
 impl Cursors {
     fn push(&self, byte: u8) {
         let target = self.target.get();
@@ -44,24 +46,47 @@ impl Cursors {
         self.target.set(target.wrapping_add(1) % LOG0_CAPACITY);
     }
 
+    fn leb128_write(&self, mut word: u32) {
+        loop {
+            let mut byte = (word & 0x7f) as u8;
+            word >>= 7;
+
+            if word != 0 {
+                byte |= CONTINUE;
+            }
+            self.push(byte);
+
+            if word == 0 {
+                return;
+            }
+        }
+    }
+
+
     pub fn write_frame(&self, sym: *const u8, type_str: *const u8, data: &[u8]) {
         let free = LOG0_CAPACITY
             - 1
             - (self.target.get() - self.host.get() + LOG0_CAPACITY) % LOG0_CAPACITY;
-        let len = data.len() + 8;
 
-        if free >= len + 2 {
-            for b in &(len as u16).to_le_bytes() {
-                self.push(*b);
-            }
+        let data_len = data.len();
 
-            for b in &(sym as u32).to_le_bytes() {
-                self.push(*b);
-            }
+        // Worst case, data length + 3 LEB encoded u32s, never really happens
+        if free >= data_len + 15 {
+            self.leb128_write(data_len as u32);
+            self.leb128_write(sym as u32);
+            self.leb128_write(type_str as u32);
 
-            for b in &(type_str as u32).to_le_bytes() {
-                self.push(*b);
-            }
+            // for b in &(len as u16).to_le_bytes() {
+            //     self.push(*b);
+            // }
+
+            // for b in &(sym as u32).to_le_bytes() {
+            //     self.push(*b);
+            // }
+
+            // for b in &(type_str as u32).to_le_bytes() {
+            //     self.push(*b);
+            // }
 
             for b in data {
                 self.push(*b);
@@ -100,10 +125,9 @@ macro_rules! log {
     };
 }
 
-// #[cfg(test)]
-// mod tests {
-//     #[test]
-//     fn it_works() {
-//         assert_eq!(2 + 2, 4);
-//     }
-// }
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+#[macro_use]
+extern crate std;

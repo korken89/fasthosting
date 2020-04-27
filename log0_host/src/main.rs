@@ -4,7 +4,6 @@ use probe_rs::{
     Probe, WireProtocol,
 };
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,10 +12,12 @@ use std::sync::Arc;
 use std::time::Instant;
 use structopt::StructOpt;
 use xmas_elf::{
-    sections::{SectionData, SHF_ALLOC, SHN_LORESERVE},
+    sections::{SectionData, SHN_LORESERVE},
     symbol_table::Entry,
     ElfFile,
 };
+
+use log0_host::Parser;
 
 #[derive(StructOpt)]
 struct Opts {
@@ -273,80 +274,6 @@ fn bytes_to_read(host_idx: usize, target_idx: usize, buffer_size: usize) -> usiz
     target_idx.wrapping_sub(host_idx).wrapping_add(buffer_size) % buffer_size
 }
 
-struct Packet {
-    string_loc: usize,
-    type_loc: usize,
-    buffer: Vec<u8>,
-}
-
-struct Parser {
-    buf: VecDeque<u8>,
-    wait_for_size: Option<usize>,
-}
-
-impl Parser {
-    pub fn new() -> Self {
-        Parser {
-            buf: VecDeque::with_capacity(10 * 1024 * 1024),
-            wait_for_size: None,
-        }
-    }
-
-    pub fn push(&mut self, data: &[u8]) {
-        self.buf.extend(data.iter());
-    }
-
-    pub fn try_parse(&mut self) -> Option<Packet> {
-        loop {
-            if self.wait_for_size == None {
-                if self.buf.len() >= 2 {
-                    let mut header = [0; 2];
-                    header[0] = self.buf.pop_front().unwrap();
-                    header[1] = self.buf.pop_front().unwrap();
-                    let size = u16::from_le_bytes(header) as usize;
-                    self.wait_for_size = Some(size);
-                } else {
-                    break;
-                }
-            } else {
-                if self.buf.len() >= self.wait_for_size.unwrap() {
-                    let mut sym = [0; 4];
-                    let mut typ = [0; 4];
-
-                    // Print string location
-                    for (i, b) in self.buf.drain(..4).enumerate() {
-                        sym[i] = b;
-                    }
-                    let sym = u32::from_le_bytes(sym);
-
-                    // Type string location
-                    for (i, b) in self.buf.drain(..4).enumerate() {
-                        typ[i] = b;
-                    }
-                    let typ = u32::from_le_bytes(typ);
-
-                    // Buffer
-                    let buf = self
-                        .buf
-                        .drain(..self.wait_for_size.unwrap() - 8)
-                        .collect::<Vec<_>>();
-
-                    self.wait_for_size = None;
-
-                    return Some(Packet {
-                        string_loc: sym as usize,
-                        type_loc: typ as usize,
-                        buffer: buf,
-                    });
-                } else {
-                    break;
-                }
-            }
-        }
-
-        None
-    }
-}
 
 struct Section<'a> {
     address: u32,
