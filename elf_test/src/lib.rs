@@ -31,11 +31,47 @@ pub enum BaseType {
     F64,
     Bool,
     Char,
+    Zero, // Zero sized types
     Unimplemented,
 }
 
 impl BaseType {
-    // TODO
+    pub fn from_base_type(ate: gimli::DwAte, size: usize, encoding: Option<BaseEncoding>) -> Self {
+        if size == 0 {
+            return BaseType::Zero;
+        }
+
+        match ate {
+            gimli::constants::DW_ATE_address => {
+                BaseType::Unsigned(4, encoding.unwrap_or(BaseEncoding::Decimal))
+            }
+            gimli::constants::DW_ATE_boolean => BaseType::Bool,
+            gimli::constants::DW_ATE_float => {
+                if size == 4 {
+                    BaseType::F32
+                } else if size == 8 {
+                    BaseType::F64
+                } else {
+                    panic!("Got DW_ATE_float with size {}", size);
+                }
+            }
+            gimli::constants::DW_ATE_signed => {
+                BaseType::Signed(size, encoding.unwrap_or(BaseEncoding::Decimal))
+            }
+            gimli::constants::DW_ATE_signed_char => {
+                BaseType::Signed(1, encoding.unwrap_or(BaseEncoding::Decimal))
+            }
+            gimli::constants::DW_ATE_unsigned => {
+                BaseType::Unsigned(size, encoding.unwrap_or(BaseEncoding::Decimal))
+            }
+            gimli::constants::DW_ATE_unsigned_char => {
+                BaseType::Unsigned(1, encoding.unwrap_or(BaseEncoding::Decimal))
+            }
+            gimli::constants::DW_ATE_UTF => BaseType::Unimplemented,
+            gimli::constants::DW_ATE_ASCII => BaseType::Unimplemented,
+            _ => BaseType::Unimplemented,
+        }
+    }
 
     /// Print buffer as base-type
     pub fn print(&self, w: &mut impl Write, buf: &[u8]) -> std::io::Result<()> {
@@ -138,60 +174,13 @@ impl BaseType {
                     std::char::from_u32(u32::from_le_bytes(buf.try_into().unwrap())).unwrap()
                 )?;
             }
+            Zero => {}
             Unimplemented => {
-                write!(w, "Unimplemented type",)?;
+                write!(w, "Unimplemented type")?;
             }
         }
 
         Ok(())
-    }
-
-    /// Print buffer as array of base-type
-    pub fn print_array(&self, _w: &mut impl Write, _buf: &[u8]) -> std::io::Result<()> {
-        todo!();
-    }
-}
-
-pub enum Printer {
-    Single(BaseType),
-    Array(BaseType),
-    // Enum // TODO
-    // Custom(()), // TODO
-}
-
-impl Printer {
-    // TODO
-    fn from_base_type(ate: gimli::DwAte, size: usize) -> Self {
-        match ate {
-            gimli::constants::DW_ATE_address => Printer::Single(BaseType::Unimplemented),
-            gimli::constants::DW_ATE_boolean => Printer::Single(BaseType::Unimplemented),
-            gimli::constants::DW_ATE_float => Printer::Single(BaseType::Unimplemented),
-            gimli::constants::DW_ATE_signed => Printer::Single(BaseType::Unimplemented),
-            gimli::constants::DW_ATE_signed_char => Printer::Single(BaseType::Unimplemented),
-            gimli::constants::DW_ATE_unsigned => Printer::Single(BaseType::Unimplemented),
-            gimli::constants::DW_ATE_unsigned_char => Printer::Single(BaseType::Unimplemented),
-            gimli::constants::DW_ATE_UTF => Printer::Single(BaseType::Unimplemented),
-            gimli::constants::DW_ATE_ASCII => Printer::Single(BaseType::Unimplemented),
-            _ => Printer::Single(BaseType::Unimplemented),
-            // gimli::constants::DW_ATE_complex_float => Printer::Single(BaseType::Unimplemented),
-            // gimli::constants::DW_ATE_imaginary_float => Printer::Single(BaseType::Unimplemented),
-            // gimli::constants::DW_ATE_packed_decimal => Printer::Single(BaseType::Unimplemented),
-            // gimli::constants::DW_ATE_numeric_string => Printer::Single(BaseType::Unimplemented),
-            // gimli::constants::DW_ATE_edited => Printer::Single(BaseType::Unimplemented),
-            // gimli::constants::DW_ATE_signed_fixed => Printer::Single(BaseType::Unimplemented),
-            // gimli::constants::DW_ATE_unsigned_fixed => Printer::Single(BaseType::Unimplemented),
-            // gimli::constants::DW_ATE_decimal_float => Printer::Single(BaseType::Unimplemented),
-            // gimli::constants::DW_ATE_UCS => Printer::Single(BaseType::Unimplemented),
-            // gimli::constants::DW_ATE_lo_user => Printer::Single(BaseType::Unimplemented),
-            // gimli::constants::DW_ATE_hi_user => Printer::Single(BaseType::Unimplemented),
-        }
-    }
-
-    pub fn print(&self, w: &mut impl Write, buf: &[u8]) -> std::io::Result<()> {
-        match self {
-            Printer::Single(t) => t.print(w, buf),
-            Printer::Array(t) => t.print_array(w, buf),
-        }
     }
 }
 
@@ -200,7 +189,7 @@ pub struct TypePrinter {
     // Range in buffer where the type is located
     pub(crate) range: Range<usize>,
     // Printer that will print the type
-    pub(crate) printer: Printer,
+    pub(crate) printer: BaseType,
 }
 
 impl TypePrinter {
@@ -281,19 +270,19 @@ mod tests {
         let buf = &[1, 0, 0, 7];
         let printer = TypePrinter {
             range: 0..1,
-            printer: Printer::Single(BaseType::Unsigned(1, BaseEncoding::Decimal)),
+            printer: BaseType::Unsigned(1, BaseEncoding::Decimal),
         };
         let printer2 = TypePrinter {
             range: 0..2,
-            printer: Printer::Single(BaseType::Unsigned(2, BaseEncoding::Hex)),
+            printer: BaseType::Unsigned(2, BaseEncoding::Hex),
         };
         let printer3 = TypePrinter {
             range: 0..4,
-            printer: Printer::Single(BaseType::Unsigned(4, BaseEncoding::Hex)),
+            printer: BaseType::Unsigned(4, BaseEncoding::Hex),
         };
         let printer4 = TypePrinter {
             range: 0..4,
-            printer: Printer::Single(BaseType::F32),
+            printer: BaseType::F32,
         };
 
         println!();

@@ -1,4 +1,6 @@
 use gimli as _;
+use std::collections::HashMap;
+use std::convert::TryInto;
 use std::fs;
 use std::ops::Range;
 use std::path::PathBuf;
@@ -49,6 +51,8 @@ fn main() -> Result<(), anyhow::Error> {
     // Iterate over the compilation units.
     let mut iter = dwarf.units();
     let mut namespace = Vec::new();
+    let mut base_printers: HashMap<String, elf_test::BaseType> = HashMap::new();
+
     while let Some(header) = iter.next()? {
         println!("Unit at <.debug_info+0x{:x}>", header.offset().0);
         let unit = dwarf.unit(header)?;
@@ -86,7 +90,15 @@ fn main() -> Result<(), anyhow::Error> {
                 //
                 // Type that we want to record has been found!!! Encode it in a printer tree for
                 // later use
-                println!(">>>>>>>>> base type, depth = {}", depth);
+                println!(
+                    ">>>>>>>>> base type, depth = {}, name = {:?}",
+                    depth,
+                    get_entry_info(&dwarf, &entry)
+                );
+
+                if let Ok(Some((name, enc, size))) = get_entry_info(&dwarf, &entry) {
+                    base_printers.insert(name, elf_test::BaseType::from_base_type(enc, size, None));
+                }
             } else if entry.tag().is_complex_type() {
                 // Type that we want to record has been found!!! Encode it in a printer tree for
                 // later use
@@ -114,6 +126,8 @@ fn main() -> Result<(), anyhow::Error> {
             }
         }
     }
+
+    println!("Printers: {:#?}", base_printers);
 
     // for sect in elf.section_iter() {
     //     if sect.flags() & SHF_ALLOC != 0 {
@@ -144,6 +158,53 @@ fn main() -> Result<(), anyhow::Error> {
     // }
 
     Ok(())
+}
+
+fn get_type<T>(_: &T) -> &'static str {
+    core::any::type_name::<T>()
+}
+
+fn get_entry_info<T: gimli::read::Reader>(
+    dwarf: &gimli::Dwarf<T>,
+    entry: &gimli::read::DebuggingInformationEntry<T>,
+) -> Result<Option<(String, gimli::DwAte, usize)>, anyhow::Error> {
+    let mut name: Option<String> = None;
+    let mut encoding: Option<gimli::DwAte> = None;
+    let mut size: Option<usize> = None;
+
+    let mut attrs = entry.attrs();
+    while let Some(attr) = attrs.next()? {
+        // Find name
+        if attr.name() == gimli::constants::DW_AT_name {
+            if let gimli::read::AttributeValue::DebugStrRef(r) = attr.value() {
+                if let Ok(s) = dwarf.string(r) {
+                    if let Ok(s) = s.to_string() {
+                        name = Some(s.into());
+                    }
+                }
+            }
+        }
+
+        // Find encoding
+        if attr.name() == gimli::constants::DW_AT_encoding {
+            if let gimli::read::AttributeValue::Encoding(enc) = attr.value() {
+                encoding = Some(enc);
+            }
+        }
+
+        // Find size
+        if attr.name() == gimli::constants::DW_AT_byte_size {
+            if let gimli::read::AttributeValue::Udata(s) = attr.value() {
+                size = Some(s.try_into().unwrap());
+            }
+        }
+    }
+
+    if let (Some(name), Some(enc), Some(size)) = (name, encoding, size) {
+        Ok(Some((name, enc, size)))
+    } else {
+        Ok(None)
+    }
 }
 
 trait DwTagExt {
