@@ -76,18 +76,6 @@ impl Cursors {
             self.leb128_write(sym as u32);
             self.leb128_write(type_str as u32);
 
-            // for b in &(len as u16).to_le_bytes() {
-            //     self.push(*b);
-            // }
-
-            // for b in &(sym as u32).to_le_bytes() {
-            //     self.push(*b);
-            // }
-
-            // for b in &(type_str as u32).to_le_bytes() {
-            //     self.push(*b);
-            // }
-
             for b in data {
                 self.push(*b);
             }
@@ -103,6 +91,8 @@ macro_rules! log {
             // log0::info!("Look what I got: {}", &TEST1);
             //
             // expands to
+            //
+            // TODO: Move to proc macro to do the string checking
 
             const FMT: &'static str = $str;
 
