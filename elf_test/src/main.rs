@@ -17,6 +17,17 @@ struct Opts {
     elf: PathBuf,
 }
 
+//
+// What do we want?
+// ----------------
+//
+// A structure for type lookup which when given a buffer can print the type.
+//
+// Eg:
+//
+// HashMap<TypeString, Printer>
+//
+
 fn main() -> Result<(), anyhow::Error> {
     let opts = Opts::from_args();
     println!("opts: {:#?}", opts.elf);
@@ -65,17 +76,22 @@ fn main() -> Result<(), anyhow::Error> {
         // Iterate over the Debugging Information Entries (DIEs) in the unit.
         let mut depth = 0;
         let mut entries = unit.entries();
-        while let Some((delta_depth, entry)) = entries.next_dfs()? {
+        while let Some((delta_depth, die_entry)) = entries.next_dfs()? {
             depth += delta_depth;
-            println!("<depth: {}><{:x}> {}", depth, entry.offset().0, entry.tag());
+            println!(
+                "<depth: {}><{:x}> {}",
+                depth,
+                die_entry.offset().0,
+                die_entry.tag()
+            );
 
             while depth <= namespace.len() as isize && namespace.len() > 0 {
                 namespace.pop();
             }
 
-            if entry.tag() == gimli::constants::DW_TAG_namespace {
+            if die_entry.tag() == gimli::constants::DW_TAG_namespace {
                 let namespace_str = if let gimli::read::AttributeValue::DebugStrRef(r) =
-                    entry.attrs().next()?.unwrap().value()
+                    die_entry.attrs().next()?.unwrap().value()
                 {
                     rustc_demangle::demangle(dwarf.string(r).unwrap().to_string().unwrap())
                 } else {
@@ -85,7 +101,7 @@ fn main() -> Result<(), anyhow::Error> {
                 namespace.push(namespace_str.to_string());
             }
 
-            if entry.tag().is_base_type() {
+            if die_entry.tag().is_base_type() {
                 // If we are tracking a complex type, add base type to it
                 //
                 // Type that we want to record has been found!!! Encode it in a printer tree for
@@ -93,13 +109,13 @@ fn main() -> Result<(), anyhow::Error> {
                 println!(
                     ">>>>>>>>> base type, depth = {}, name = {:?}",
                     depth,
-                    get_entry_info(&dwarf, &entry)
+                    get_entry_info(&dwarf, &die_entry)
                 );
 
-                if let Ok(Some((name, enc, size))) = get_entry_info(&dwarf, &entry) {
+                if let Ok(Some((name, enc, size))) = get_entry_info(&dwarf, &die_entry) {
                     base_printers.insert(name, elf_test::BaseType::from_base_type(enc, size, None));
                 }
-            } else if entry.tag().is_complex_type() {
+            } else if die_entry.tag().is_complex_type() {
                 // Type that we want to record has been found!!! Encode it in a printer tree for
                 // later use
                 println!(
@@ -110,7 +126,7 @@ fn main() -> Result<(), anyhow::Error> {
             }
 
             // Iterate over the attributes in the DIE.
-            let mut attrs = entry.attrs();
+            let mut attrs = die_entry.attrs();
             while let Some(attr) = attrs.next()? {
                 if attr.name() == gimli::constants::DW_AT_name {
                     if let gimli::read::AttributeValue::DebugStrRef(r) = attr.value() {
@@ -139,15 +155,15 @@ fn main() -> Result<(), anyhow::Error> {
     //     if sect.get_name(elf) == Ok(".symtab") {
     //         if let Ok(symtab) = sect.get_data(elf) {
     //             if let SectionData::SymbolTable32(entries) = symtab {
-    //                 for entry in entries {
-    //                     if let Ok(name) = entry.get_name(elf) {
+    //                 for die_entry in entries {
+    //                     if let Ok(name) = die_entry.get_name(elf) {
     //                         // println!("names: {}", rustc_demangle::demangle(name).to_string());
     //                         if name == "LOG0_CURSORS" {
     //                             println!(
     //                                 "        Found '{}', address = 0x{:8x}, size = {}b",
     //                                 name,
-    //                                 entry.value(),
-    //                                 entry.size()
+    //                                 die_entry.value(),
+    //                                 die_entry.size()
     //                             );
     //                         }
     //                     }
@@ -166,13 +182,13 @@ fn get_type<T>(_: &T) -> &'static str {
 
 fn get_entry_info<T: gimli::read::Reader>(
     dwarf: &gimli::Dwarf<T>,
-    entry: &gimli::read::DebuggingInformationEntry<T>,
+    die_entry: &gimli::read::DebuggingInformationEntry<T>,
 ) -> Result<Option<(String, gimli::DwAte, usize)>, anyhow::Error> {
     let mut name: Option<String> = None;
     let mut encoding: Option<gimli::DwAte> = None;
     let mut size: Option<usize> = None;
 
-    let mut attrs = entry.attrs();
+    let mut attrs = die_entry.attrs();
     while let Some(attr) = attrs.next()? {
         // Find name
         if attr.name() == gimli::constants::DW_AT_name {

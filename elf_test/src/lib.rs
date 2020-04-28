@@ -199,8 +199,8 @@ impl TypePrinter {
 }
 
 pub enum TypeNode<'a> {
-    Branch(&'a str, Box<PrinterTree<'a>>),
-    Leaf(&'a str, TypePrinter),
+    Struct(&'a str, Box<PrinterTree<'a>>),
+    Variable(&'a str, &'a str),
 }
 
 pub struct PrinterTree<'a> {
@@ -212,30 +212,32 @@ impl<'a> PrinterTree<'a> {
         PrinterTree { nodes: Vec::new() }
     }
 
-    pub fn add_printer(&mut self, name: &'a str, p: TypePrinter) {
-        self.nodes.push(TypeNode::Leaf(name, p));
+    pub fn add_variable(&mut self, name: &'a str, p: &'a str) {
+        self.nodes.push(TypeNode::Variable(name, p));
     }
 
-    pub fn add_branch(&mut self, name: &'a str, l: PrinterTree<'a>) {
-        self.nodes.push(TypeNode::Branch(name, l.into()));
+    pub fn add_struct(&mut self, name: &'a str, l: PrinterTree<'a>) {
+        self.nodes.push(TypeNode::Struct(name, l.into()));
     }
 
     pub fn print(&self, buf: &[u8]) {
-        self.print_internal(0, buf);
+        println!("{{");
+        self.print_internal(1, buf);
+        println!("}}");
     }
 
     fn print_internal(&self, depth: usize, buf: &[u8]) {
         let pad = " ".repeat(depth * 4);
         for v in &self.nodes {
             match v {
-                TypeNode::Branch(n, t) => {
+                TypeNode::Struct(n, t) => {
                     println!("{}{}: {{", &pad, n);
                     t.print_internal(depth + 1, buf);
                     println!("{}}},", &pad);
                 }
-                TypeNode::Leaf(n, t) => {
+                TypeNode::Variable(n, t) => {
                     print!("{}{}: ", &pad, n);
-                    // t.print();
+                    print!("{}", t);
                     println!(",");
                 }
             }
@@ -298,25 +300,25 @@ mod tests {
 
     #[test]
     fn print_tree() {
-        // let mut tree = PrinterTree::new();
-        // tree.add_printer("a".into(), FakeTypes::U8(1));
+        let mut tree = PrinterTree::new();
+        tree.add_variable("a", "123");
 
-        // let mut tree2 = PrinterTree::new();
-        // tree2.add_printer("a2".into(), FakeTypes::U16(92));
+        let mut tree2 = PrinterTree::new();
+        tree2.add_variable("a2", "92");
 
-        // let mut tree3 = PrinterTree::new();
-        // tree3.add_printer("a3".into(), FakeTypes::U16(12));
-        // tree3.add_printer("b3".into(), FakeTypes::U32(7));
-        // tree2.add_branch("tree2".into(), tree3);
+        let mut tree3 = PrinterTree::new();
+        tree3.add_variable("a3", "12");
+        tree3.add_variable("b3", "7");
+        tree2.add_struct("tree2", tree3);
 
-        // tree2.add_printer("b2".into(), FakeTypes::U32(93));
+        tree2.add_variable("b2", "93");
 
-        // tree.add_branch("tree".into(), tree2);
+        tree.add_struct("tree", tree2);
 
-        // tree.add_printer("b".into(), FakeTypes::U16(2));
-        // tree.add_printer("c".into(), FakeTypes::U32(3));
-        // tree.add_printer("d".into(), FakeTypes::U64(4));
+        tree.add_variable("b", "2");
+        tree.add_variable("c", "3");
+        tree.add_variable("d", "4");
 
-        // tree.print(&[]);
+        tree.print(&[]);
     }
 }
