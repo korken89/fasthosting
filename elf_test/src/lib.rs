@@ -18,15 +18,15 @@ impl ExtRange<usize> for Range<usize> {
 pub enum BaseEncoding {
     Decimal,
     Hex,
-    // Octal,
-    // Binary,
+    Octal,
+    Binary,
 }
 
 // Convert DW_ATE + size into the following
 #[derive(Debug)]
 pub enum BaseType {
-    Unsigned(usize, BaseEncoding),
-    Signed(usize, BaseEncoding),
+    Unsigned(usize),
+    Signed(usize),
     F32,
     F64,
     Bool,
@@ -36,15 +36,12 @@ pub enum BaseType {
 }
 
 impl BaseType {
-    pub fn from_base_type(ate: gimli::DwAte, size: usize, encoding: Option<BaseEncoding>) -> Self {
+    pub fn from_base_type(ate: gimli::DwAte, size: usize) -> Self {
         if size == 0 {
             return BaseType::Zero;
         }
 
         match ate {
-            gimli::constants::DW_ATE_address => {
-                BaseType::Unsigned(4, encoding.unwrap_or(BaseEncoding::Decimal))
-            }
             gimli::constants::DW_ATE_boolean => BaseType::Bool,
             gimli::constants::DW_ATE_float => {
                 if size == 4 {
@@ -55,18 +52,12 @@ impl BaseType {
                     panic!("Got DW_ATE_float with size {}", size);
                 }
             }
-            gimli::constants::DW_ATE_signed => {
-                BaseType::Signed(size, encoding.unwrap_or(BaseEncoding::Decimal))
+            gimli::constants::DW_ATE_signed | gimli::constants::DW_ATE_signed_char => {
+                BaseType::Signed(size)
             }
-            gimli::constants::DW_ATE_signed_char => {
-                BaseType::Signed(1, encoding.unwrap_or(BaseEncoding::Decimal))
-            }
-            gimli::constants::DW_ATE_unsigned => {
-                BaseType::Unsigned(size, encoding.unwrap_or(BaseEncoding::Decimal))
-            }
-            gimli::constants::DW_ATE_unsigned_char => {
-                BaseType::Unsigned(1, encoding.unwrap_or(BaseEncoding::Decimal))
-            }
+            gimli::constants::DW_ATE_address
+            | gimli::constants::DW_ATE_unsigned
+            | gimli::constants::DW_ATE_unsigned_char => BaseType::Unsigned(size),
             gimli::constants::DW_ATE_UTF => BaseType::Unimplemented,
             gimli::constants::DW_ATE_ASCII => BaseType::Unimplemented,
             _ => BaseType::Unimplemented,
@@ -74,18 +65,17 @@ impl BaseType {
     }
 
     /// Print buffer as base-type
-    pub fn print(&self, w: &mut impl Write, buf: &[u8]) -> std::io::Result<()> {
-        use BaseEncoding::*;
+    pub fn write(&self, w: &mut impl Write, buf: &[u8]) -> std::io::Result<()> {
         use BaseType::*;
 
         match self {
-            Unsigned(size, _) => assert!(
+            Unsigned(size) => assert!(
                 *size == buf.len(),
                 "Unsigned size ({}) did not match buffer ({})",
                 size,
                 buf.len()
             ),
-            Signed(size, _) => assert!(
+            Signed(size) => assert!(
                 *size == buf.len(),
                 "Signed size ({}) did not match buffer ({})",
                 size,
@@ -110,16 +100,16 @@ impl BaseType {
                 buf.len()
             ),
             Char => assert!(
-                4 == buf.len(),
+                1 == buf.len(),
                 "char size ({}) did not match buffer ({})",
-                4,
+                1,
                 buf.len()
             ),
             _ => (),
         }
 
         match self {
-            Unsigned(size, Decimal) => match size {
+            Unsigned(size) => match size {
                 1 => write!(w, "{}", buf[0])?,
                 2 => write!(w, "{}", u16::from_le_bytes(buf.try_into().unwrap()))?,
                 4 => write!(w, "{}", u32::from_le_bytes(buf.try_into().unwrap()))?,
@@ -127,28 +117,12 @@ impl BaseType {
                 16 => write!(w, "{}", u128::from_le_bytes(buf.try_into().unwrap()))?,
                 _ => panic!("Unsupported size: {:#?}", self),
             },
-            Unsigned(size, Hex) => match size {
-                1 => write!(w, "0x{:x}", buf[0])?,
-                2 => write!(w, "0x{:x}", u16::from_le_bytes(buf.try_into().unwrap()))?,
-                4 => write!(w, "0x{:x}", u32::from_le_bytes(buf.try_into().unwrap()))?,
-                8 => write!(w, "0x{:x}", u64::from_le_bytes(buf.try_into().unwrap()))?,
-                16 => write!(w, "0x{:x}", u128::from_le_bytes(buf.try_into().unwrap()))?,
-                _ => panic!("Unsupported size: {:#?}", self),
-            },
-            Signed(size, Decimal) => match size {
+            Signed(size) => match size {
                 1 => write!(w, "{}", buf[0] as i8)?,
                 2 => write!(w, "{}", i16::from_le_bytes(buf.try_into().unwrap()))?,
                 4 => write!(w, "{}", i32::from_le_bytes(buf.try_into().unwrap()))?,
                 8 => write!(w, "{}", i64::from_le_bytes(buf.try_into().unwrap()))?,
                 16 => write!(w, "{}", i128::from_le_bytes(buf.try_into().unwrap()))?,
-                _ => panic!("Unsupported size: {:#?}", self),
-            },
-            Signed(size, Hex) => match size {
-                1 => write!(w, "0x{:x}", buf[0] as i8)?,
-                2 => write!(w, "0x{:x}", i16::from_le_bytes(buf.try_into().unwrap()))?,
-                4 => write!(w, "0x{:x}", i32::from_le_bytes(buf.try_into().unwrap()))?,
-                8 => write!(w, "0x{:x}", i64::from_le_bytes(buf.try_into().unwrap()))?,
-                16 => write!(w, "0x{:x}", i128::from_le_bytes(buf.try_into().unwrap()))?,
                 _ => panic!("Unsupported size: {:#?}", self),
             },
             F32 => {
@@ -168,11 +142,7 @@ impl BaseType {
                 }
             }
             Char => {
-                write!(
-                    w,
-                    "{}",
-                    std::char::from_u32(u32::from_le_bytes(buf.try_into().unwrap())).unwrap()
-                )?;
+                write!(w, "{}", char::from(buf[0]))?;
             }
             Zero => {}
             Unimplemented => {
@@ -185,63 +155,82 @@ impl BaseType {
 }
 
 // For any DWARF type it needs to become a tree of the following
+#[derive(Debug)]
 pub struct TypePrinter {
     // Range in buffer where the type is located
-    pub(crate) range: Range<usize>,
+    range: Range<usize>,
     // Printer that will print the type
-    pub(crate) printer: BaseType,
+    printer: BaseType,
 }
 
 impl TypePrinter {
-    pub fn print(&self, w: &mut impl Write, buf: &[u8]) -> std::io::Result<()> {
-        self.printer.print(w, &buf.get(self.range.clone()).unwrap())
+    pub fn write(&self, w: &mut impl Write, buf: &[u8]) -> std::io::Result<()> {
+        self.printer.write(w, &buf.get(self.range.clone()).unwrap())
     }
 }
 
-pub enum TypeNode<'a> {
-    Struct(&'a str, Box<PrinterTree<'a>>),
-    Variable(&'a str, &'a str),
+// #[derive(Debug)]
+// pub enum TypeNodePrinter {
+//     Struct(Option<String>, Vec<TypeNodePrinter>),
+//     Variable(Option<String>, TypePrinter),
+// }
+
+#[derive(Debug)]
+pub enum PrinterTree {
+    Struct(Option<String>, Vec<PrinterTree>),
+    Variable(Option<String>, TypePrinter),
 }
 
-pub struct PrinterTree<'a> {
-    nodes: Vec<TypeNode<'a>>,
-}
-
-impl<'a> PrinterTree<'a> {
-    pub fn new() -> Self {
-        PrinterTree { nodes: Vec::new() }
-    }
-
-    pub fn add_variable(&mut self, name: &'a str, p: &'a str) {
-        self.nodes.push(TypeNode::Variable(name, p));
-    }
-
-    pub fn add_struct(&mut self, name: &'a str, l: PrinterTree<'a>) {
-        self.nodes.push(TypeNode::Struct(name, l.into()));
+impl PrinterTree {
+    pub fn from_base_type(ate: gimli::DwAte, size: usize) -> Self {
+        PrinterTree::Variable(
+            None,
+            TypePrinter {
+                range: 0..size,
+                printer: BaseType::from_base_type(ate, size),
+            },
+        )
     }
 
     pub fn print(&self, buf: &[u8]) {
-        println!("{{");
-        self.print_internal(1, buf);
-        println!("}}");
+        let out = std::io::stdout();
+        self.write_internal(&mut out.lock(), 0, buf).unwrap();
     }
 
-    fn print_internal(&self, depth: usize, buf: &[u8]) {
+    pub fn write(&self, w: &mut impl Write, buf: &[u8]) -> std::io::Result<()> {
+        self.write_internal(w, 0, buf)
+    }
+
+    fn write_internal(&self, w: &mut impl Write, depth: usize, buf: &[u8]) -> std::io::Result<()> {
         let pad = " ".repeat(depth * 4);
-        for v in &self.nodes {
-            match v {
-                TypeNode::Struct(n, t) => {
+        match self {
+            PrinterTree::Struct(n, vec) => {
+                if let Some(n) = n {
                     println!("{}{}: {{", &pad, n);
-                    t.print_internal(depth + 1, buf);
-                    println!("{}}},", &pad);
+                } else {
+                    println!("{}{{", &pad);
                 }
-                TypeNode::Variable(n, t) => {
+
+                for t in vec {
+                    t.write_internal(w, depth + 1, buf)?;
+                }
+
+                println!("{}}},", &pad);
+            }
+            PrinterTree::Variable(n, t) => {
+                if let Some(n) = n {
                     print!("{}{}: ", &pad, n);
-                    print!("{}", t);
-                    println!(",");
+                } else {
+                    print!("{}", &pad);
                 }
+
+                t.write(w, buf)?;
+
+                println!(",");
             }
         }
+
+        Ok(())
     }
 }
 
@@ -272,15 +261,15 @@ mod tests {
         let buf = &[1, 0, 0, 7];
         let printer = TypePrinter {
             range: 0..1,
-            printer: BaseType::Unsigned(1, BaseEncoding::Decimal),
+            printer: BaseType::Unsigned(1),
         };
         let printer2 = TypePrinter {
             range: 0..2,
-            printer: BaseType::Unsigned(2, BaseEncoding::Hex),
+            printer: BaseType::Unsigned(2),
         };
         let printer3 = TypePrinter {
             range: 0..4,
-            printer: BaseType::Unsigned(4, BaseEncoding::Hex),
+            printer: BaseType::Unsigned(4),
         };
         let printer4 = TypePrinter {
             range: 0..4,
@@ -300,25 +289,25 @@ mod tests {
 
     #[test]
     fn print_tree() {
-        let mut tree = PrinterTree::new();
-        tree.add_variable("a", "123");
+        // let mut tree = PrinterTree::new();
+        // tree.add_variable("a", "123");
 
-        let mut tree2 = PrinterTree::new();
-        tree2.add_variable("a2", "92");
+        // let mut tree2 = PrinterTree::new();
+        // tree2.add_variable("a2", "92");
 
-        let mut tree3 = PrinterTree::new();
-        tree3.add_variable("a3", "12");
-        tree3.add_variable("b3", "7");
-        tree2.add_struct("tree2", tree3);
+        // let mut tree3 = PrinterTree::new();
+        // tree3.add_variable("a3", "12");
+        // tree3.add_variable("b3", "7");
+        // tree2.add_struct("tree2", tree3);
 
-        tree2.add_variable("b2", "93");
+        // tree2.add_variable("b2", "93");
 
-        tree.add_struct("tree", tree2);
+        // tree.add_struct("tree", tree2);
 
-        tree.add_variable("b", "2");
-        tree.add_variable("c", "3");
-        tree.add_variable("d", "4");
+        // tree.add_variable("b", "2");
+        // tree.add_variable("c", "3");
+        // tree.add_variable("d", "4");
 
-        tree.print(&[]);
+        // tree.print(&[]);
     }
 }

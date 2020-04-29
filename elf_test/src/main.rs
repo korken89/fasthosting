@@ -1,15 +1,11 @@
+use elf_test::PrinterTree;
 use gimli as _;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs;
-use std::ops::Range;
 use std::path::PathBuf;
 use structopt::StructOpt;
-use xmas_elf::{
-    sections::{SectionData, SHF_ALLOC},
-    symbol_table::Entry,
-    ElfFile,
-};
+use xmas_elf::ElfFile;
 
 #[derive(StructOpt)]
 struct Opts {
@@ -25,8 +21,22 @@ struct Opts {
 //
 // Eg:
 //
-// HashMap<TypeString, Printer>
+// fn generate_printers(elf: &ElfFile) -> Wrapper(HashMap<TypeString, Printer>) { ... }
 //
+// where Wrapper.print("app::my_type", &buf) will print the type based on the data in buf
+//
+
+pub struct TypePrinters(HashMap<String, PrinterTree>);
+
+impl TypePrinters {
+    pub fn print(&self, _type_string: &str, _buffer: &[u8]) {
+        todo!()
+    }
+}
+
+pub fn generate_printers(_elf: &ElfFile) -> TypePrinters {
+    todo!()
+}
 
 fn main() -> Result<(), anyhow::Error> {
     let opts = Opts::from_args();
@@ -40,7 +50,7 @@ fn main() -> Result<(), anyhow::Error> {
         _ => panic!("Unknown endian"),
     };
 
-    // Load a section and return as `Cow<[u8]>`.
+    // Load a section and return as `&[u8]`.
     let load_section = |id: gimli::SectionId| -> Result<&[u8], gimli::Error> {
         if let Some(section) = elf.find_section_by_name(id.name()) {
             Ok(section.raw_data(&elf))
@@ -62,16 +72,11 @@ fn main() -> Result<(), anyhow::Error> {
     // Iterate over the compilation units.
     let mut iter = dwarf.units();
     let mut namespace = Vec::new();
-    let mut base_printers: HashMap<String, elf_test::BaseType> = HashMap::new();
+    let mut base_printers: HashMap<String, elf_test::PrinterTree> = HashMap::new();
 
     while let Some(header) = iter.next()? {
         println!("Unit at <.debug_info+0x{:x}>", header.offset().0);
         let unit = dwarf.unit(header)?;
-
-        // TODO:
-        //
-        // Pass 1: Extract base types
-        // Pass 2: Extract complex types that resolve into trees with base types as leafs
 
         // Iterate over the Debugging Information Entries (DIEs) in the unit.
         let mut depth = 0;
@@ -79,7 +84,7 @@ fn main() -> Result<(), anyhow::Error> {
         while let Some((delta_depth, die_entry)) = entries.next_dfs()? {
             depth += delta_depth;
             println!(
-                "<depth: {}><{:x}> {}",
+                "<depth: {}><0x{:x}> {}",
                 depth,
                 die_entry.offset().0,
                 die_entry.tag()
@@ -109,11 +114,11 @@ fn main() -> Result<(), anyhow::Error> {
                 println!(
                     ">>>>>>>>> base type, depth = {}, name = {:?}",
                     depth,
-                    get_entry_info(&dwarf, &die_entry)
+                    get_base_type_info(&dwarf, &die_entry)
                 );
 
-                if let Ok(Some((name, enc, size))) = get_entry_info(&dwarf, &die_entry) {
-                    base_printers.insert(name, elf_test::BaseType::from_base_type(enc, size, None));
+                if let Ok(Some((name, enc, size))) = get_base_type_info(&dwarf, &die_entry) {
+                    base_printers.insert(name, elf_test::PrinterTree::from_base_type(enc, size));
                 }
             } else if die_entry.tag().is_complex_type() {
                 // Type that we want to record has been found!!! Encode it in a printer tree for
@@ -123,6 +128,8 @@ fn main() -> Result<(), anyhow::Error> {
                     namespace.join("::"),
                     depth
                 );
+
+                // unit.entries_at_offset(offset).tag().is_base_type()
             }
 
             // Iterate over the attributes in the DIE.
@@ -145,42 +152,17 @@ fn main() -> Result<(), anyhow::Error> {
 
     println!("Printers: {:#?}", base_printers);
 
-    // for sect in elf.section_iter() {
-    //     if sect.flags() & SHF_ALLOC != 0 {
-    //         println!("alloc section: {:?}", sect.get_name(elf));
-    //     } else {
-    //         println!("not alloc section: {:?}", sect.get_name(elf));
-    //     }
-
-    //     if sect.get_name(elf) == Ok(".symtab") {
-    //         if let Ok(symtab) = sect.get_data(elf) {
-    //             if let SectionData::SymbolTable32(entries) = symtab {
-    //                 for die_entry in entries {
-    //                     if let Ok(name) = die_entry.get_name(elf) {
-    //                         // println!("names: {}", rustc_demangle::demangle(name).to_string());
-    //                         if name == "LOG0_CURSORS" {
-    //                             println!(
-    //                                 "        Found '{}', address = 0x{:8x}, size = {}b",
-    //                                 name,
-    //                                 die_entry.value(),
-    //                                 die_entry.size()
-    //                             );
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
+    println!("i32: {:#?}", base_printers.get("i32"));
 
     Ok(())
 }
 
+#[allow(dead_code)]
 fn get_type<T>(_: &T) -> &'static str {
     core::any::type_name::<T>()
 }
 
-fn get_entry_info<T: gimli::read::Reader>(
+fn get_base_type_info<T: gimli::read::Reader>(
     dwarf: &gimli::Dwarf<T>,
     die_entry: &gimli::read::DebuggingInformationEntry<T>,
 ) -> Result<Option<(String, gimli::DwAte, usize)>, anyhow::Error> {
