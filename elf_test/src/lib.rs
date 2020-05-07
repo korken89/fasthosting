@@ -31,14 +31,14 @@ pub enum BaseType {
     F64,
     Bool,
     Char,
-    Zero, // Zero sized types
+    Zero(String), // Zero sized types
     Unimplemented,
 }
 
 impl BaseType {
-    pub fn from_base_type(ate: gimli::DwAte, size: usize) -> Self {
+    pub fn from_base_type(ate: gimli::DwAte, name: &str, size: usize) -> Self {
         if size == 0 {
-            return BaseType::Zero;
+            return BaseType::Zero(name.into());
         }
 
         match ate {
@@ -144,7 +144,9 @@ impl BaseType {
             Char => {
                 write!(w, "{}", char::from(buf[0]))?;
             }
-            Zero => {}
+            Zero(s) => {
+                write!(w, "{}", &s)?;
+            }
             Unimplemented => {
                 write!(w, "Unimplemented type")?;
             }
@@ -169,25 +171,20 @@ impl TypePrinter {
     }
 }
 
-// #[derive(Debug)]
-// pub enum TypeNodePrinter {
-//     Struct(Option<String>, Vec<TypeNodePrinter>),
-//     Variable(Option<String>, TypePrinter),
-// }
-
 #[derive(Debug)]
 pub enum PrinterTree {
     Struct(Option<String>, Vec<PrinterTree>),
+    // Enum(Option<String>, Vec<(String, PrinterTree)>),
     Variable(Option<String>, TypePrinter),
 }
 
 impl PrinterTree {
-    pub fn from_base_type(ate: gimli::DwAte, size: usize) -> Self {
+    pub fn from_base_type(ate: gimli::DwAte, name: &str, size: usize) -> Self {
         PrinterTree::Variable(
             None,
             TypePrinter {
                 range: 0..size,
-                printer: BaseType::from_base_type(ate, size),
+                printer: BaseType::from_base_type(ate, name, size),
             },
         )
     }

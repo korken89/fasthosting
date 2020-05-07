@@ -34,16 +34,7 @@ impl TypePrinters {
     }
 }
 
-pub fn generate_printers(_elf: &ElfFile) -> TypePrinters {
-    todo!()
-}
-
-fn main() -> Result<(), anyhow::Error> {
-    let opts = Opts::from_args();
-    println!("opts: {:#?}", opts.elf);
-
-    let bytes = fs::read(opts.elf)?;
-    let elf = &ElfFile::new(&bytes).map_err(anyhow::Error::msg)?;
+pub fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
     let endian = match elf.header.pt1.data() {
         xmas_elf::header::Data::BigEndian => gimli::RunTimeEndian::Big,
         xmas_elf::header::Data::LittleEndian => gimli::RunTimeEndian::Little,
@@ -71,7 +62,11 @@ fn main() -> Result<(), anyhow::Error> {
 
     // Iterate over the compilation units.
     let mut iter = dwarf.units();
+
+    // Namespace tracker
     let mut namespace = Vec::new();
+
+    // Where printers are stored
     let mut base_printers: HashMap<String, elf_test::PrinterTree> = HashMap::new();
 
     while let Some(header) = iter.next()? {
@@ -118,7 +113,10 @@ fn main() -> Result<(), anyhow::Error> {
                 );
 
                 if let Ok(Some((name, enc, size))) = get_base_type_info(&dwarf, &die_entry) {
-                    base_printers.insert(name, elf_test::PrinterTree::from_base_type(enc, size));
+                    base_printers.insert(
+                        name.clone(),
+                        elf_test::PrinterTree::from_base_type(enc, &name, size),
+                    );
                 }
             } else if die_entry.tag().is_complex_type() {
                 // Type that we want to record has been found!!! Encode it in a printer tree for
@@ -153,6 +151,18 @@ fn main() -> Result<(), anyhow::Error> {
     println!("Printers: {:#?}", base_printers);
 
     println!("i32: {:#?}", base_printers.get("i32"));
+
+    Ok(TypePrinters(base_printers))
+}
+
+fn main() -> Result<(), anyhow::Error> {
+    let opts = Opts::from_args();
+    println!("opts: {:#?}", opts.elf);
+
+    let bytes = fs::read(opts.elf)?;
+    let elf = &ElfFile::new(&bytes).map_err(anyhow::Error::msg)?;
+
+    let printers = generate_printers(&elf)?;
 
     Ok(())
 }
