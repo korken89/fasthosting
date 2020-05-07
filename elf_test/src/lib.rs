@@ -174,12 +174,12 @@ impl TypePrinter {
 #[derive(Debug)]
 pub enum PrinterTree {
     Struct(Option<String>, Vec<PrinterTree>),
-    // Enum(Option<String>, Vec<(String, PrinterTree)>),
+    Enum(Option<String>, Vec<(String, PrinterTree)>),
     Variable(Option<String>, TypePrinter),
 }
 
 impl PrinterTree {
-    pub fn from_base_type(ate: gimli::DwAte, name: &str, size: usize) -> Self {
+    pub fn new_from_base_type(ate: gimli::DwAte, name: &str, size: usize) -> Self {
         PrinterTree::Variable(
             None,
             TypePrinter {
@@ -187,6 +187,14 @@ impl PrinterTree {
                 printer: BaseType::from_base_type(ate, name, size),
             },
         )
+    }
+
+    pub fn new_struct() -> Self {
+        PrinterTree::Struct(None, Vec::new())
+    }
+
+    pub fn new_enum() -> Self {
+        PrinterTree::Enum(None, Vec::new())
     }
 
     pub fn print(&self, buf: &[u8]) {
@@ -213,6 +221,20 @@ impl PrinterTree {
                 }
 
                 println!("{}}},", &pad);
+            }
+            PrinterTree::Enum(_n, _vec) => {
+                todo!()
+                // if let Some(n) = n {
+                //     println!("{}{}: {{", &pad, n);
+                // } else {
+                //     println!("{}{{", &pad);
+                // }
+
+                // for t in vec {
+                //     t.write_internal(w, depth + 1, buf)?;
+                // }
+
+                // println!("{}}},", &pad);
             }
             PrinterTree::Variable(n, t) => {
                 if let Some(n) = n {

@@ -61,7 +61,7 @@ pub fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
     let dwarf = dwarf.borrow(|&section| gimli::EndianSlice::new(section, endian));
 
     // Iterate over the compilation units.
-    let mut iter = dwarf.units();
+    let mut dwarf_units = dwarf.units();
 
     // Namespace tracker
     let mut namespace = Vec::new();
@@ -69,13 +69,18 @@ pub fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
     // Where printers are stored
     let mut base_printers: HashMap<String, elf_test::PrinterTree> = HashMap::new();
 
-    while let Some(header) = iter.next()? {
+
+    while let Some(header) = dwarf_units.next()? {
         println!("Unit at <.debug_info+0x{:x}>", header.offset().0);
         let unit = dwarf.unit(header)?;
+
 
         // Iterate over the Debugging Information Entries (DIEs) in the unit.
         let mut depth = 0;
         let mut entries = unit.entries();
+
+        // TODO: Split into new function from here to allow for recursive creation of types
+        //
         while let Some((delta_depth, die_entry)) = entries.next_dfs()? {
             depth += delta_depth;
             println!(
@@ -85,10 +90,12 @@ pub fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
                 die_entry.tag()
             );
 
+            // Namespace tracking
             while depth <= namespace.len() as isize && namespace.len() > 0 {
                 namespace.pop();
             }
 
+            // Namespace tracking
             if die_entry.tag() == gimli::constants::DW_TAG_namespace {
                 let namespace_str = if let gimli::read::AttributeValue::DebugStrRef(r) =
                     die_entry.attrs().next()?.unwrap().value()
@@ -101,6 +108,7 @@ pub fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
                 namespace.push(namespace_str.to_string());
             }
 
+            // Check for base type
             if die_entry.tag().is_base_type() {
                 // If we are tracking a complex type, add base type to it
                 //
@@ -115,7 +123,7 @@ pub fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
                 if let Ok(Some((name, enc, size))) = get_base_type_info(&dwarf, &die_entry) {
                     base_printers.insert(
                         name.clone(),
-                        elf_test::PrinterTree::from_base_type(enc, &name, size),
+                        elf_test::PrinterTree::new_from_base_type(enc, &name, size),
                     );
                 }
             } else if die_entry.tag().is_complex_type() {
