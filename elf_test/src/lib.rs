@@ -1,3 +1,4 @@
+use gimli::{constants, DwAte};
 use std::convert::TryInto;
 use std::io::Write;
 use std::ops::Range;
@@ -36,14 +37,16 @@ pub enum BaseType {
 }
 
 impl BaseType {
-    pub fn from_base_type(ate: gimli::DwAte, name: &str, size: usize) -> Self {
+    pub fn from_base_type(ate: DwAte, name: &str, size: usize) -> Self {
         if size == 0 {
             return BaseType::Zero(name.into());
         }
 
+        use constants as c;
+
         match ate {
-            gimli::constants::DW_ATE_boolean => BaseType::Bool,
-            gimli::constants::DW_ATE_float => {
+            c::DW_ATE_boolean => BaseType::Bool,
+            c::DW_ATE_float => {
                 if size == 4 {
                     BaseType::F32
                 } else if size == 8 {
@@ -52,14 +55,12 @@ impl BaseType {
                     panic!("Got DW_ATE_float with size {}", size);
                 }
             }
-            gimli::constants::DW_ATE_signed | gimli::constants::DW_ATE_signed_char => {
-                BaseType::Signed(size)
+            c::DW_ATE_signed | c::DW_ATE_signed_char => BaseType::Signed(size),
+            c::DW_ATE_address | c::DW_ATE_unsigned | c::DW_ATE_unsigned_char => {
+                BaseType::Unsigned(size)
             }
-            gimli::constants::DW_ATE_address
-            | gimli::constants::DW_ATE_unsigned
-            | gimli::constants::DW_ATE_unsigned_char => BaseType::Unsigned(size),
-            gimli::constants::DW_ATE_UTF => BaseType::Unimplemented,
-            gimli::constants::DW_ATE_ASCII => BaseType::Unimplemented,
+            c::DW_ATE_UTF => BaseType::Unimplemented,
+            c::DW_ATE_ASCII => BaseType::Unimplemented,
             _ => BaseType::Unimplemented,
         }
     }
@@ -179,7 +180,7 @@ pub enum PrinterTree {
 }
 
 impl PrinterTree {
-    pub fn new_from_base_type(ate: gimli::DwAte, name: &str, size: usize) -> Self {
+    pub fn new_from_base_type(ate: DwAte, name: &str, size: usize) -> Self {
         PrinterTree::Variable(
             None,
             TypePrinter {
@@ -296,13 +297,13 @@ mod tests {
         };
 
         println!();
-        printer.print(&mut out.lock(), buf).ok();
+        printer.write(&mut out.lock(), buf).ok();
         println!();
-        printer2.print(&mut out.lock(), buf).ok();
+        printer2.write(&mut out.lock(), buf).ok();
         println!();
-        printer3.print(&mut out.lock(), buf).ok();
+        printer3.write(&mut out.lock(), buf).ok();
         println!();
-        printer4.print(&mut out.lock(), buf).ok();
+        printer4.write(&mut out.lock(), buf).ok();
         println!();
     }
 
