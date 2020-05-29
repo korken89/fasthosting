@@ -5,7 +5,12 @@ pub mod mod1 {
     pub mod mod2 {
         pub struct MyStruct {
             pub b: i32,
-            pub d: u32,
+            pub d: MyStruct2,
+        }
+
+        pub struct MyStruct2 {
+            pub a: i32,
+            pub c: u32,
         }
     }
 }
@@ -23,7 +28,7 @@ use stm32l4xx_hal as _;
 
 static mut TEST1: mod1::mod2::MyStruct = mod1::mod2::MyStruct {
     b: 2,
-    d: 4,
+    d: mod1::mod2::MyStruct2 { a: 1, c: 3 },
 };
 
 static mut TEST2: (f32, u32, &str) = (1.0, 2, &"test test");
@@ -36,10 +41,8 @@ static mut TEST5: () = ();
 
 static mut TEST6: [u8; 13] = [0; 13];
 
-
 #[entry]
 fn init() -> ! {
-
     loop {
         unsafe {
             core::ptr::read_volatile(&TEST1);

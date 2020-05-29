@@ -2,7 +2,7 @@ use elf_test::PrinterTree;
 use gimli::{
     self, constants,
     read::{AttributeValue, DebuggingInformationEntry, Reader},
-    DwAte, Dwarf, EndianSlice, EntriesCursor, RunTimeEndian,
+    DwAte, Dwarf, EndianSlice, EntriesCursor, RunTimeEndian, Unit,
 };
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -77,14 +77,39 @@ fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
         println!("Unit at <.debug_info+0x{:x}>", header.offset().0);
         let unit = dwarf.unit(header)?;
 
+        println!("unit type: {}", get_type(&unit));
+
         // Iterate over the Debugging Information Entries (DIEs) in the unit.
         let mut depth = 0;
         let mut entries = unit.entries();
 
         println!("Entries: {}", get_type(&entries));
 
-        while let Some((delta_depth, die_entry)) = entries.next_dfs()? {
-            depth += delta_depth;
+        let entries = &mut entries;
+
+        let mut get_current = false;
+
+        loop {
+            let die_entry = if get_current {
+                if let Some(die_entry) = entries.current() {
+                // ...
+                    die_entry
+                }
+                else {
+                    get_current = false;
+                    continue;
+                }
+            }
+            else {
+                if let Some((delta_depth, die_entry)) = entries.next_dfs()? {
+                    depth += delta_depth;
+                    //..
+                    die_entry
+                } else {
+                    break;
+                }
+            };
+
             println!(
                 "<depth: {}><0x{:x}> {}",
                 depth,
@@ -139,25 +164,37 @@ fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
                     depth
                 );
 
+                extract_complex_type(
+                    &dwarf,
+                    &unit,
+                    entries, //&mut entries.clone(), // Look down using a clone
+                    &mut printers,
+                    &mut namespace_tracker,
+                    &mut depth,
+                )?;
+
+                get_current = true;
+
+
                 // unit.entries_at_offset(offset).tag().is_base_type()
             }
 
             // Iterate over the attributes in the DIE.
-            let mut attrs = die_entry.attrs();
-            while let Some(attr) = attrs.next()? {
-                if attr.name() == constants::DW_AT_name {
-                    if let AttributeValue::DebugStrRef(r) = attr.value() {
-                        if let Ok(s) = dwarf.string(r) {
-                            if let Ok(s) = s.to_string() {
-                                println!("   {}: {}", attr.name(), s);
-                            }
-                        }
-                    }
-                }
-                // else {
-                //     println!("   {}: {:x?}", attr.name(), attr.value());
-                // }
-            }
+            // let mut attrs = die_entry.attrs();
+            // while let Some(attr) = attrs.next()? {
+            //     if attr.name() == constants::DW_AT_name {
+            //         if let AttributeValue::DebugStrRef(r) = attr.value() {
+            //             if let Ok(s) = dwarf.string(r) {
+            //                 if let Ok(s) = s.to_string() {
+            //                     println!("   {}: {}", attr.name(), s);
+            //                 }
+            //             }
+            //         }
+            //     }
+            //     // else {
+            //     //     println!("   {}: {:x?}", attr.name(), attr.value());
+            //     // }
+            // }
         }
     }
 
@@ -170,11 +207,96 @@ fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
 
 fn extract_complex_type(
     dwarf: &Dwarf<EndianSlice<RunTimeEndian>>,
+    unit: &Unit<EndianSlice<RunTimeEndian>, usize>,
     entries: &mut EntriesCursor<EndianSlice<RunTimeEndian>>,
     printers: &mut HashMap<String, elf_test::PrinterTree>,
     namespace_tracker: &mut Vec<String>,
-    dwarf_depth: &mut isize,
+    depth: &mut isize,
 ) -> Result<(), anyhow::Error> {
+    let start_depth = *depth;
+    if let Some(die_entry) = entries.current() {
+        // Iterate over the attributes in the DIE.
+        let mut attrs = die_entry.attrs();
+        while let Some(attr) = attrs.next()? {
+            if attr.name() == constants::DW_AT_name {
+                if let AttributeValue::DebugStrRef(r) = attr.value() {
+                    if let Ok(s) = dwarf.string(r) {
+                        if let Ok(s) = s.to_string() {
+                            println!("   {}: {}", attr.name(), s);
+                        }
+                    }
+                }
+            } else {
+                println!("   {}: {:x?}", attr.name(), attr.value());
+            }
+        }
+
+        while let Some((delta_depth, die_entry)) = entries.next_dfs()? {
+            *depth += delta_depth;
+
+            if *depth <= start_depth {
+                break;
+            }
+
+            println!(
+                "   <cdepth: {}><0x{:x}> {}",
+                depth,
+                die_entry.offset().0,
+                die_entry.tag()
+            );
+
+            let mut attrs = die_entry.attrs();
+            while let Some(attr) = attrs.next()? {
+                if attr.name() == constants::DW_AT_name {
+                    if let AttributeValue::DebugStrRef(r) = attr.value() {
+                        if let Ok(s) = dwarf.string(r) {
+                            if let Ok(s) = s.to_string() {
+                                println!("   {}: {}", attr.name(), s);
+                            }
+                        }
+                    }
+                } else if attr.name() == constants::DW_AT_type {
+                    if let AttributeValue::UnitRef(unit_offset) = attr.value() {
+                        println!("      DW_AT_type: {:x?}", unit_offset);
+                        let mut entry_lookup = unit.entries_at_offset(unit_offset)?;
+                        let mut ldepth = 0;
+
+                        while let Some((delta_depth, die_entry)) = entry_lookup.next_dfs()? {
+                            ldepth += delta_depth;
+                            println!(
+                                "        <ldepth: {}><0x{:x}> {}",
+                                ldepth,
+                                die_entry.offset().0,
+                                die_entry.tag()
+                            );
+
+                            if die_entry.tag().is_base_type() {
+                                // If we are tracking a complex type, add base type to it
+                                //
+                                // Type that we want to record has been found!!! Encode it in a printer tree for
+                                // later use
+                                println!(
+                                    "         >>>>>>>>> base type, ldepth = {}, name = {:?}",
+                                    ldepth,
+                                    get_base_type_info(&dwarf, &die_entry)
+                                );
+                            }
+
+                            if ldepth <= 0 {
+                                break;
+                            }
+                        }
+
+                        // println!("          {:x?}", entry_lookup);
+                        // println!("          {:x?}", entry_lookup.next_dfs()?);
+                    }
+                } else {
+                    println!("   {}: {:x?}", attr.name(), attr.value());
+                }
+            }
+        }
+    }
+    println!(">>>>>>>>> complex type exit");
     Ok(())
 }
 
