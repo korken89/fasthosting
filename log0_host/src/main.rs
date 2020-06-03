@@ -3,7 +3,7 @@ use gimli as _;
 use log0_host::{bytes_to_read, fmt, parser::Parser};
 use probe_rs::{
     flashing::{download_file_with_options, DownloadOptions, FlashProgress, Format},
-    Probe, WireProtocol,
+    MemoryInterface, Probe, WireProtocol,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -44,11 +44,11 @@ fn main() -> Result<()> {
     println!("Probe speed: {} kHz", speed_khz);
 
     // Attach to a chip.
-    let session = probe.attach("stm32l412cbu")?;
+    let mut session = probe.attach("stm32l412cbu")?;
 
     print!("Spinning up the binary ...");
     download_file_with_options(
-        &session,
+        &mut session,
         Path::new(&opts.elf),
         Format::Elf,
         DownloadOptions {
@@ -58,7 +58,7 @@ fn main() -> Result<()> {
             keep_unwritten_bytes: false,
         },
     )?;
-    let core = session.attach_to_core(0)?;
+    let mut core = session.core(0)?;
     core.reset_and_halt()?;
 
     println!(" Done!");
