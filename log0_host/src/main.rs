@@ -59,7 +59,7 @@ fn main() -> Result<()> {
         },
     )?;
     let mut core = session.core(0)?;
-    core.reset_and_halt()?;
+    core.reset_and_halt(std::time::Duration::from_millis(10))?;
 
     println!(" Done!");
 
@@ -155,7 +155,7 @@ fn main() -> Result<()> {
         }
     }
 
-    core.halt()?;
+    core.halt(std::time::Duration::from_millis(10))?;
 
     println!("Exiting ...");
 
