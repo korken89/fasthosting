@@ -92,20 +92,28 @@ fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
         loop {
             let die_entry = if get_current {
                 if let Some(die_entry) = entries.current() {
-                // ...
+                    // ...
+                    println!("die entry...");
                     die_entry
-                }
-                else {
+                } else {
+                    println!("get current...");
                     get_current = false;
                     continue;
                 }
-            }
-            else {
+            } else {
                 if let Some((delta_depth, die_entry)) = entries.next_dfs()? {
+                    if delta_depth > 0 {
+                        println!("increase depth...");
+                    } else if delta_depth < 0 {
+                        println!("decrease depth...");
+                    } else {
+                        println!("same depth...");
+                    }
                     depth += delta_depth;
                     //..
                     die_entry
                 } else {
+                    println!("break...");
                     break;
                 }
             };
@@ -153,6 +161,8 @@ fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
                         elf_test::PrinterTree::new_from_base_type(enc, &name, size),
                     );
                 }
+
+                get_current = false;
             } else if die_entry.tag().is_complex_type() {
                 // TODO: Start extraction of complex type here
 
@@ -175,8 +185,9 @@ fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
 
                 get_current = true;
 
-
-                // unit.entries_at_offset(offset).tag().is_base_type()
+            // unit.entries_at_offset(offset).tag().is_base_type()
+            } else {
+                get_current = false;
             }
 
             // Iterate over the attributes in the DIE.

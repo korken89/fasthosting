@@ -37,16 +37,18 @@ pub struct Cursors {
     buf: *mut u8,
 }
 
-const CONTINUE: u8 = 1 << 7;
-
 impl Cursors {
+    /// NB: Assumes there is space in the buffer for the data
     fn push(&self, byte: u8) {
         let target = self.target.get();
         unsafe { self.buf.add(target).write(byte) }
         self.target.set(target.wrapping_add(1) % LOG0_CAPACITY);
     }
 
+    /// NB: Assumes there is space in the buffer for the data
     fn leb128_write(&self, mut word: u32) {
+        const CONTINUE: u8 = 1 << 7;
+
         loop {
             let mut byte = (word & 0x7f) as u8;
             word >>= 7;
@@ -62,20 +64,21 @@ impl Cursors {
         }
     }
 
+    fn free(&self) -> usize {
+        LOG0_CAPACITY - 1 - (self.target.get() - self.host.get() + LOG0_CAPACITY) % LOG0_CAPACITY
+    }
 
+    #[doc(hidden)]
     pub fn write_frame(&self, sym: *const u8, type_str: *const u8, data: &[u8]) {
-        let free = LOG0_CAPACITY
-            - 1
-            - (self.target.get() - self.host.get() + LOG0_CAPACITY) % LOG0_CAPACITY;
-
         let data_len = data.len();
 
         // Worst case, data length + 3 LEB encoded u32s, never really happens
-        if free >= data_len + 15 {
+        if self.free() >= data_len + 15 {
             self.leb128_write(data_len as u32);
             self.leb128_write(sym as u32);
             self.leb128_write(type_str as u32);
 
+            // TODO: Replace with a copy of the buffer + single update of the target cursor
             for b in data {
                 self.push(*b);
             }
@@ -85,34 +88,30 @@ impl Cursors {
 
 #[macro_export]
 macro_rules! log {
-    ($str:literal, $var:ident) => {
-        {
+    ($str:literal, $var:ident) => {{
+        // log0::info!("Look what I got: {}", &TEST1);
+        //
+        // expands to
+        //
+        // TODO: Move to proc macro to do the string checking
 
-            // log0::info!("Look what I got: {}", &TEST1);
-            //
-            // expands to
-            //
-            // TODO: Move to proc macro to do the string checking
+        const FMT: &'static str = $str;
 
-            const FMT: &'static str = $str;
-
-            #[link_section = ".fasthosting"]
-            static S: [u8; FMT.as_bytes().len()] = unsafe {
-                *log0_target::Transmute::<*const [u8; FMT.len()], &[u8; FMT.as_bytes().len()]> {
-                    from: FMT.as_ptr() as *const [u8; FMT.as_bytes().len()],
-                }
-                .to
-            };
-
-            let s = unsafe { log0_target::get_type_str(&$var) };
-            let v = unsafe { log0_target::any_to_byte_slice(&$var) };
-
-
-            unsafe {
-                log0_target::LOG0_CURSORS.write_frame(&S as *const _, s.as_ptr() as *const _, v);
+        #[link_section = ".fasthosting"]
+        static S: [u8; FMT.as_bytes().len()] = unsafe {
+            *log0_target::Transmute::<*const [u8; FMT.len()], &[u8; FMT.as_bytes().len()]> {
+                from: FMT.as_ptr() as *const [u8; FMT.as_bytes().len()],
             }
+            .to
+        };
+
+        let s = unsafe { log0_target::get_type_str(&$var) };
+        let v = unsafe { log0_target::any_to_byte_slice(&$var) };
+
+        unsafe {
+            log0_target::LOG0_CURSORS.write_frame(&S as *const _, s.as_ptr() as *const _, v);
         }
-    };
+    }};
 }
 
 #[cfg(test)]
