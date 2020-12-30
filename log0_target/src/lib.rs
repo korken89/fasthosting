@@ -64,8 +64,16 @@ impl Cursors {
         }
     }
 
+    fn len(&self) -> usize {
+        self.target
+            .get()
+            .wrapping_sub(self.host.get())
+            .wrapping_add(LOG0_CAPACITY)
+            % LOG0_CAPACITY
+    }
+
     fn free(&self) -> usize {
-        LOG0_CAPACITY - 1 - (self.target.get() - self.host.get() + LOG0_CAPACITY) % LOG0_CAPACITY
+        LOG0_CAPACITY - 1 - self.len()
     }
 
     #[doc(hidden)]

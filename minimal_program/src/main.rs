@@ -43,8 +43,11 @@ static mut TEST6: [u8; 13] = [0; 13];
 
 #[entry]
 fn init() -> ! {
+    let test: u32 = 1;
+
     loop {
         unsafe {
+            core::ptr::read_volatile(&test);
             core::ptr::read_volatile(&TEST1);
             core::ptr::read_volatile(&TEST2);
             core::ptr::read_volatile(&TEST3);
@@ -59,5 +62,9 @@ fn init() -> ! {
         cortex_m::asm::delay(1_000_000);
 
         log0_target::log!("Look what I got: {}", TEST4);
+
+        cortex_m::asm::delay(1_000_000);
+
+        log0_target::log!("Look what I got: {}", test);
     }
 }

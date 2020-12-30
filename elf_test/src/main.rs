@@ -291,6 +291,27 @@ fn extract_complex_type(
                                     ldepth,
                                     get_base_type_info(&dwarf, &die_entry)
                                 );
+                            } else if die_entry.tag().is_complex_type() {
+                                // TODO: Start extraction of complex type here
+
+                                // Type that we want to record has been found!!! Encode it in a printer tree for
+                                // later use
+                                println!(
+                                    ">>>>>>>>> complex type - in {}, depth = {}",
+                                    namespace_tracker.join("::"),
+                                    depth
+                                );
+
+                                extract_complex_type(
+                                    &dwarf,
+                                    &unit,
+                                    entries, //&mut entries.clone(), // Look down using a clone
+                                    printers,
+                                    namespace_tracker,
+                                    depth,
+                                )?;
+
+                                // unit.entries_at_offset(offset).tag().is_base_type()
                             }
 
                             if ldepth <= 0 {
