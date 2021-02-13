@@ -1,4 +1,5 @@
 use elf_test::PrinterTree;
+use fallible_iterator::FallibleIterator;
 use gimli::{
     self, constants,
     read::{AttributeValue, DebuggingInformationEntry, Reader},
@@ -87,36 +88,24 @@ fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
 
         let entries = &mut entries;
 
-        let mut get_current = false;
+        let mut skip_dfs = 0;
 
-        loop {
-            let die_entry = if get_current {
-                if let Some(die_entry) = entries.current() {
-                    // ...
-                    println!("die entry...");
-                    die_entry
-                } else {
-                    println!("get current...");
-                    get_current = false;
-                    continue;
-                }
-            } else {
-                if let Some((delta_depth, die_entry)) = entries.next_dfs()? {
-                    if delta_depth > 0 {
-                        println!("increase depth...");
-                    } else if delta_depth < 0 {
-                        println!("decrease depth...");
-                    } else {
-                        println!("same depth...");
-                    }
-                    depth += delta_depth;
-                    //..
-                    die_entry
-                } else {
-                    println!("break...");
-                    break;
-                }
-            };
+        while let Some((delta_depth, die_entry)) = entries.next_dfs()? {
+            depth += delta_depth;
+
+            if skip_dfs > 0 {
+                skip_dfs -= 1;
+                continue;
+            }
+
+            // if delta_depth > 0 {
+            //     println!("increase depth...");
+            // } else if delta_depth < 0 {
+            //     println!("decrease depth...");
+            // } else {
+            //     println!("same depth...");
+            // }
+            //..
 
             println!(
                 "<depth: {}><0x{:x}> {}",
@@ -161,8 +150,6 @@ fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
                         elf_test::PrinterTree::new_from_base_type(enc, &name, size),
                     );
                 }
-
-                get_current = false;
             } else if die_entry.tag().is_complex_type() {
                 // TODO: Start extraction of complex type here
 
@@ -174,20 +161,16 @@ fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
                     depth
                 );
 
-                extract_complex_type(
+                let steps_to_skip = extract_complex_type(
                     &dwarf,
                     &unit,
-                    entries, //&mut entries.clone(), // Look down using a clone
+                    entries.clone(), //&mut entries.clone(), // Look down using a clone
                     &mut printers,
                     &mut namespace_tracker,
                     &mut depth,
                 )?;
 
-                get_current = true;
-
-            // unit.entries_at_offset(offset).tag().is_base_type()
-            } else {
-                get_current = false;
+                skip_dfs = steps_to_skip;
             }
 
             // Iterate over the attributes in the DIE.
@@ -219,117 +202,229 @@ fn generate_printers(elf: &ElfFile) -> Result<TypePrinters, anyhow::Error> {
 fn extract_complex_type(
     dwarf: &Dwarf<EndianSlice<RunTimeEndian>>,
     unit: &Unit<EndianSlice<RunTimeEndian>, usize>,
-    entries: &mut EntriesCursor<EndianSlice<RunTimeEndian>>,
+    mut entries: EntriesCursor<EndianSlice<RunTimeEndian>>,
     printers: &mut HashMap<String, elf_test::PrinterTree>,
     namespace_tracker: &mut Vec<String>,
     depth: &mut isize,
-) -> Result<(), anyhow::Error> {
+) -> Result<usize, anyhow::Error> {
     let start_depth = *depth;
+    let entries = &mut entries;
+
+    let mut skips = 0;
+
     if let Some(die_entry) = entries.current() {
+        println!("Something here!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1");
         // Iterate over the attributes in the DIE.
-        let mut attrs = die_entry.attrs();
-        while let Some(attr) = attrs.next()? {
+        // let mut attrs = die_entry.attrs();
+        // while let Some(attr) = attrs.next()? {
+        //     if attr.name() == constants::DW_AT_name {
+        //         if let AttributeValue::DebugStrRef(r) = attr.value() {
+        //             if let Ok(s) = dwarf.string(r) {
+        //                 if let Ok(s) = s.to_string() {
+        //                     println!("   {}: {}", attr.name(), s);
+        //                 }
+        //             }
+        //         }
+        //     } else {
+        //         println!("   {}: {:x?}", attr.name(), attr.value());
+        //     }
+        // }
+
+        let attrs = die_entry.attrs().collect::<Vec<_>>()?;
+        for attr in attrs {
             if attr.name() == constants::DW_AT_name {
                 if let AttributeValue::DebugStrRef(r) = attr.value() {
                     if let Ok(s) = dwarf.string(r) {
                         if let Ok(s) = s.to_string() {
-                            println!("   {}: {}", attr.name(), s);
+                            println!("   {}<0x{:x}>: {}", attr.name(), die_entry.offset().0, s);
                         }
                     }
+                }
+            } else if attr.name() == constants::DW_AT_type {
+                if let AttributeValue::UnitRef(unit_offset) = attr.value() {
+                    println!("      DW_AT_type: {:x?}", unit_offset);
+                    let mut entry_lookup = unit.entries_at_offset(unit_offset)?;
+                    let mut ldepth = 0;
+
+                    while let Some((delta_depth, die_entry)) = entry_lookup.next_dfs()? {
+                        ldepth += delta_depth;
+                        println!(
+                            "        <ldepth: {}><0x{:x}> {}",
+                            ldepth,
+                            die_entry.offset().0,
+                            die_entry.tag()
+                        );
+
+                        if die_entry.tag().is_base_type() {
+                            // If we are tracking a complex type, add base type to it
+                            //
+                            // Type that we want to record has been found!!! Encode it in a printer tree for
+                            // later use
+                            println!(
+                                "         >>>>>>>>> base type, ldepth = {}, name = {:?}",
+                                ldepth,
+                                get_base_type_info(&dwarf, &die_entry)
+                            );
+                        } else if die_entry.tag().is_complex_type() {
+                            // TODO: Start extraction of complex type here
+
+                            // Type that we want to record has been found!!! Encode it in a printer tree for
+                            // later use
+                            println!(
+                                ">>>>>>>>> complex type - in {}, depth = {}",
+                                namespace_tracker.join("::"),
+                                depth
+                            );
+
+                            println!(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 1",);
+
+                            extract_complex_type(
+                                &dwarf,
+                                &unit,
+                                unit.entries_at_offset(die_entry.offset())?.clone(),
+                                printers,
+                                namespace_tracker,
+                                depth,
+                            )?;
+
+                            // unit.entries_at_offset(offset).tag().is_base_type()
+                        }
+
+                        if ldepth <= 0 {
+                            break;
+                        }
+                    }
+
+                    // println!("          {:x?}", entry_lookup);
+                    // println!("          {:x?}", entry_lookup.next_dfs()?);
+                }
+            } else {
+                println!("   {}: {:x?}", attr.name(), attr.value());
+            }
+        }
+    }
+
+    while let Some((delta_depth, die_entry)) = entries.next_dfs()? {
+        *depth += delta_depth;
+
+        if *depth <= start_depth {
+            break;
+        }
+
+        let attrs = die_entry.attrs().collect::<Vec<_>>()?;
+        for attr in attrs {
+            if attr.name() == constants::DW_AT_name {
+                if let AttributeValue::DebugStrRef(r) = attr.value() {
+                    if let Ok(s) = dwarf.string(r) {
+                        if let Ok(s) = s.to_string() {
+                            println!("   {}<0x{:x}>: {}", attr.name(), die_entry.offset().0, s);
+                        }
+                    }
+                }
+            } else if attr.name() == constants::DW_AT_type {
+                if let AttributeValue::UnitRef(unit_offset) = attr.value() {
+                    println!(
+                        "      DW_AT_type<0x{:x}>: {:x?}",
+                        die_entry.offset().0,
+                        unit_offset
+                    );
+                    let mut entry_lookup = unit.entries_at_offset(unit_offset)?;
+                    let mut ldepth = 0;
+
+                    while let Some((delta_depth, die_entry)) = entry_lookup.next_dfs()? {
+                        ldepth += delta_depth;
+                        println!(
+                            "        <ldepth: {}><0x{:x}> {}",
+                            ldepth,
+                            die_entry.offset().0,
+                            die_entry.tag()
+                        );
+
+                        if die_entry.tag().is_base_type() {
+                            // If we are tracking a complex type, add base type to it
+                            //
+                            // Type that we want to record has been found!!! Encode it in a printer tree for
+                            // later use
+                            println!(
+                                "         >>>>>>>>> base type, ldepth = {}, name = {:?}",
+                                ldepth,
+                                get_base_type_info(&dwarf, &die_entry)
+                            );
+                        } else if die_entry.tag().is_complex_type() {
+                            // TODO: Start extraction of complex type here
+
+                            // Type that we want to record has been found!!! Encode it in a printer tree for
+                            // later use
+                            println!(
+                                ">>>>>>>>> complex type - in {}, depth = {}",
+                                namespace_tracker.join("::"),
+                                depth
+                            );
+
+                            println!(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 2",);
+
+                            println!("        <0x{:x}> {}", die_entry.offset().0, die_entry.tag());
+
+                            // let mut i = unit.entries_at_offset(die_entry.offset())?;
+                            // while let Some((delta_depth, die_entry)) = i.next_dfs()? {
+                            //     println!(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 3",);
+                            //     let attrs = die_entry.attrs().collect::<Vec<_>>()?;
+                            //     for attr in attrs {
+                            //         if attr.name() == constants::DW_AT_name {
+                            //             if let AttributeValue::DebugStrRef(r) = attr.value() {
+                            //                 if let Ok(s) = dwarf.string(r) {
+                            //                     if let Ok(s) = s.to_string() {
+                            //                         println!(
+                            //                             "   {}<0x{:x}>: {}",
+                            //                             attr.name(),
+                            //                             die_entry.offset().0,
+                            //                             s
+                            //                         );
+                            //                     }
+                            //                 }
+                            //             }
+                            //         } else {
+                            //             println!("   {}: {:x?}", attr.name(), attr.value());
+                            //         }
+                            //     }
+                            // }
+
+                            extract_complex_type(
+                                &dwarf,
+                                &unit,
+                                unit.entries_at_offset(die_entry.offset())?.clone(),
+                                printers,
+                                namespace_tracker,
+                                depth,
+                            )?;
+
+                            // unit.entries_at_offset(offset).tag().is_base_type()
+                        }
+
+                        if ldepth <= 0 {
+                            break;
+                        }
+                    }
+
+                    // println!("          {:x?}", entry_lookup);
+                    // println!("          {:x?}", entry_lookup.next_dfs()?);
                 }
             } else {
                 println!("   {}: {:x?}", attr.name(), attr.value());
             }
         }
 
-        while let Some((delta_depth, die_entry)) = entries.next_dfs()? {
-            *depth += delta_depth;
-
-            if *depth <= start_depth {
-                break;
-            }
-
-            println!(
-                "   <cdepth: {}><0x{:x}> {}",
-                depth,
-                die_entry.offset().0,
-                die_entry.tag()
-            );
-
-            let mut attrs = die_entry.attrs();
-            while let Some(attr) = attrs.next()? {
-                if attr.name() == constants::DW_AT_name {
-                    if let AttributeValue::DebugStrRef(r) = attr.value() {
-                        if let Ok(s) = dwarf.string(r) {
-                            if let Ok(s) = s.to_string() {
-                                println!("   {}: {}", attr.name(), s);
-                            }
-                        }
-                    }
-                } else if attr.name() == constants::DW_AT_type {
-                    if let AttributeValue::UnitRef(unit_offset) = attr.value() {
-                        println!("      DW_AT_type: {:x?}", unit_offset);
-                        let mut entry_lookup = unit.entries_at_offset(unit_offset)?;
-                        let mut ldepth = 0;
-
-                        while let Some((delta_depth, die_entry)) = entry_lookup.next_dfs()? {
-                            ldepth += delta_depth;
-                            println!(
-                                "        <ldepth: {}><0x{:x}> {}",
-                                ldepth,
-                                die_entry.offset().0,
-                                die_entry.tag()
-                            );
-
-                            if die_entry.tag().is_base_type() {
-                                // If we are tracking a complex type, add base type to it
-                                //
-                                // Type that we want to record has been found!!! Encode it in a printer tree for
-                                // later use
-                                println!(
-                                    "         >>>>>>>>> base type, ldepth = {}, name = {:?}",
-                                    ldepth,
-                                    get_base_type_info(&dwarf, &die_entry)
-                                );
-                            } else if die_entry.tag().is_complex_type() {
-                                // TODO: Start extraction of complex type here
-
-                                // Type that we want to record has been found!!! Encode it in a printer tree for
-                                // later use
-                                println!(
-                                    ">>>>>>>>> complex type - in {}, depth = {}",
-                                    namespace_tracker.join("::"),
-                                    depth
-                                );
-
-                                extract_complex_type(
-                                    &dwarf,
-                                    &unit,
-                                    entries, //&mut entries.clone(), // Look down using a clone
-                                    printers,
-                                    namespace_tracker,
-                                    depth,
-                                )?;
-
-                                // unit.entries_at_offset(offset).tag().is_base_type()
-                            }
-
-                            if ldepth <= 0 {
-                                break;
-                            }
-                        }
-
-                        // println!("          {:x?}", entry_lookup);
-                        // println!("          {:x?}", entry_lookup.next_dfs()?);
-                    }
-                } else {
-                    println!("   {}: {:x?}", attr.name(), attr.value());
-                }
-            }
-        }
+        // println!(
+        //     "   <cdepth: {}><0x{:x}> {}",
+        //     depth,
+        //     die_entry.offset().0,
+        //     die_entry.tag()
+        // );
     }
+
     println!(">>>>>>>>> complex type exit");
-    Ok(())
+
+    Ok(0)
 }
 
 fn main() -> Result<(), anyhow::Error> {
