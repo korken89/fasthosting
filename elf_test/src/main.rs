@@ -1,4 +1,4 @@
-use elf_test::{Struct, Type};
+use elf_test::{Enum, Struct, Type};
 use gimli::{
     self, constants,
     read::{AttributeValue, DebuggingInformationEntry, Reader},
@@ -198,22 +198,62 @@ fn extract_type(unit_info: &UnitInfo, node: EntriesTreeNode<R>) -> Option<Type> 
                 entry.attr(gimli::DW_AT_name).unwrap().unwrap().value(),
             );
             let mut named_children = std::collections::HashMap::new();
+            let mut variants = std::collections::HashMap::new();
 
             let mut children = node.children();
             while let Ok(Some(child)) = children.next() {
                 // Recursively process a child.
                 let entry = child.entry();
-                if let gimli::DW_TAG_member = entry.tag() {
-                    let (name, typ) = extract_member(unit_info, child);
-                    named_children.insert(name, typ.unwrap_or(Type::Unknown));
+                // let type_name = extract_name(
+                //     &unit_info.debug_info,
+                //     entry.attr(gimli::DW_AT_name).unwrap().unwrap().value(),
+                // );
+                // println!("{:?}", type_name);
+                match entry.tag() {
+                    gimli::DW_TAG_member => {
+                        let (name, typ) = extract_member(unit_info, child);
+                        named_children.insert(name, typ.unwrap_or(Type::Unknown));
+                    }
+                    gimli::DW_TAG_variant_part => {
+                        while let Ok(Some(child)) = children.next() {
+                            let entry = child.entry();
+                            if entry.tag() == gimli::DW_TAG_structure_type {
+                                let mut name = String::new();
+                                let mut attrs = entry.attrs();
+                                while let Ok(Some(attr)) = attrs.next() {
+                                    match attr.name() {
+                                        gimli::DW_AT_name => {
+                                            name = extract_name(unit_info.debug_info, attr.value())
+                                                .unwrap_or_else(|| "<undefined>".to_string());
+                                        }
+                                        _ => (),
+                                    }
+                                }
+                                variants.insert(
+                                    name,
+                                    extract_type(unit_info, child).unwrap_or(Type::Unknown),
+                                );
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    _tag => {}
                 };
             }
 
-            return Some(Type::Struct(Struct {
-                name: type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
-                named_children: named_children,
-                indexed_children: vec![],
-            }));
+            if !named_children.is_empty() {
+                return Some(Type::Struct(Struct {
+                    name: type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
+                    named_children: named_children,
+                    indexed_children: vec![],
+                }));
+            } else if !variants.is_empty() {
+                return Some(Type::Enum(Enum {
+                    name: type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
+                    variants,
+                }));
+            }
         }
         gimli::DW_TAG_base_type => {
             // let type_name = extract_name(
@@ -241,7 +281,6 @@ fn extract_member(unit_info: &UnitInfo, node: EntriesTreeNode<R>) -> (String, Op
             gimli::DW_AT_name => {
                 name = extract_name(&unit_info.debug_info, attr.value())
                     .unwrap_or_else(|| "<undefined>".to_string());
-                println!("{}", name);
             }
             gimli::DW_AT_type => {
                 let mut tree = unit_info
@@ -297,12 +336,7 @@ impl<'debuginfo> UnitInfo<'debuginfo> {
         die_cursor_state.entries_cursor.next_dfs().unwrap();
 
         while let Some(current) = die_cursor_state.entries_cursor.next_sibling().unwrap() {
-            // if depth != 0 && depth != 1 {
-            //     println!("break {}", depth);
-            //     break;
-            // }
             if let gimli::DW_TAG_variable = current.tag() {
-                println!("variable");
                 let mut variable = Variable {
                     name: String::new(),
                     file: String::new(),
@@ -339,18 +373,6 @@ impl<'debuginfo> UnitInfo<'debuginfo> {
 
         while let Ok(Some(current)) = children.next() {
             if let gimli::DW_TAG_structure_type = current.entry().tag() {
-                println!("struct");
-                let mut attrs = current.entry().attrs();
-                while let Ok(Some(attr)) = attrs.next() {
-                    match attr.name() {
-                        gimli::DW_AT_name => {
-                            let name = extract_name(&self.debug_info, attr.value())
-                                .unwrap_or_else(|| "<undefined>".to_string());
-                            println!("{}", name);
-                        }
-                        _ => (),
-                    }
-                }
                 if let Some(typ) = extract_type(self, current) {
                     types.push(typ);
                 }
