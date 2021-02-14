@@ -1,4 +1,4 @@
-use elf_test::{Enum, Struct, Type};
+use elf_test::{Enum, Struct, Type, TypeKind};
 use gimli::{
     self, constants,
     read::{AttributeValue, DebuggingInformationEntry, Reader},
@@ -49,14 +49,16 @@ fn generate_printers(elf: &[u8]) -> Result<TypePrinters, anyhow::Error> {
     let mut units = debug_info.get_units();
     'outer: while let Some(unit_info) = debug_info.get_next_unit_info(&mut units) {
         let mut entries = unit_info.unit.entries();
-        while let Some(die_cursor_state) = &mut unit_info.get_next_namespace_die(&mut entries) {
-            let types = unit_info.get_types(&mut die_cursor_state.clone()).unwrap();
-            printers.extend(types.into_iter().map(|t| (t.name().to_string(), t)));
-            // Early abort for less bloat.
-            if die_cursor_state.name == "mod2" {
-                break 'outer;
-            }
-        }
+        let types = unit_info.list_types().unwrap();
+        printers.extend(types.into_iter().map(|t| (t.name().to_string(), t)));
+        // while let Some(die_cursor_state) = &mut unit_info.get_next_namespace_die(&mut entries) {
+        //     let types = unit_info.get_types(&mut die_cursor_state.clone()).unwrap();
+        //     printers.extend(types.into_iter().map(|t| (t.name().to_string(), t)));
+        //     // Early abort for less bloat.
+        //     if die_cursor_state.name == "mod2" {
+        //         break 'outer;
+        //     }
+        // }
     }
 
     println!("Printers: {:#?}", printers);
@@ -64,16 +66,32 @@ fn generate_printers(elf: &[u8]) -> Result<TypePrinters, anyhow::Error> {
     Ok(TypePrinters(printers))
 }
 
+/// Helper types to reduce signature bloat.
 type R = gimli::EndianReader<gimli::LittleEndian, std::rc::Rc<[u8]>>;
 type DwarfReader = gimli::read::EndianRcSlice<gimli::LittleEndian>;
+type UnitIter =
+    gimli::DebugInfoUnitHeadersIter<gimli::EndianReader<gimli::LittleEndian, std::rc::Rc<[u8]>>>;
+type NamespaceDie<'abbrev, 'unit> = gimli::DebuggingInformationEntry<
+    'abbrev,
+    'unit,
+    gimli::EndianReader<gimli::LittleEndian, std::rc::Rc<[u8]>>,
+    usize,
+>;
+type EntriesCursor<'abbrev, 'unit> = gimli::EntriesCursor<
+    'abbrev,
+    'unit,
+    gimli::EndianReader<gimli::LittleEndian, std::rc::Rc<[u8]>>,
+>;
+
+/// This struct contains all the necessary debug info we might need during our traversal.
 pub struct DebugInfo {
     dwarf: gimli::Dwarf<DwarfReader>,
     _frame_section: gimli::DebugFrame<DwarfReader>,
 }
 
 impl DebugInfo {
-    // Parse debug information directly from a buffer containing an ELF file.
-    pub fn from_raw(data: &[u8]) -> Result<Self, ()> {
+    /// Parse debug information directly from a buffer containing an ELF file.
+    fn from_raw(data: &[u8]) -> Result<Self, ()> {
         let object = object::File::parse(data).unwrap();
 
         // Load a section and return as `Cow<[u8]>`.
@@ -114,10 +132,12 @@ impl DebugInfo {
         })
     }
 
+    /// Returns an iterator over all the units in the currently open DWARF blob.
     fn get_units(&self) -> UnitIter {
         self.dwarf.units()
     }
 
+    /// Get the next unit in the unit iterator given.
     fn get_next_unit_info(&self, units: &mut UnitIter) -> Option<UnitInfo> {
         while let Ok(Some(header)) = units.next() {
             if let Ok(unit) = self.dwarf.unit(header) {
@@ -131,29 +151,78 @@ impl DebugInfo {
     }
 }
 
-type UnitIter =
-    gimli::DebugInfoUnitHeadersIter<gimli::EndianReader<gimli::LittleEndian, std::rc::Rc<[u8]>>>;
-
-fn extract_name(
-    debug_info: &DebugInfo,
-    attribute_value: gimli::AttributeValue<R>,
-) -> Option<String> {
-    match attribute_value {
-        gimli::AttributeValue::DebugStrRef(name_ref) => {
-            let name_raw = debug_info.dwarf.string(name_ref).unwrap();
-            Some(String::from_utf8_lossy(&name_raw).to_string())
-        }
-        gimli::AttributeValue::String(name) => Some(String::from_utf8_lossy(&name).to_string()),
-        _ => None,
-    }
-}
-
 struct UnitInfo<'debuginfo> {
     debug_info: &'debuginfo DebugInfo,
     unit: gimli::Unit<gimli::EndianReader<gimli::LittleEndian, std::rc::Rc<[u8]>>, usize>,
 }
 
 impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
+    /// Extracts the string representation of any string in the DWARF blob.
+    /// This is mostly used to extract names of DIEs.
+    fn extract_string_of(&self, attr: &gimli::Attribute<R>) -> Option<String> {
+        match attr.value() {
+            gimli::AttributeValue::DebugStrRef(name_ref) => {
+                let name_raw = self.debug_info.dwarf.string(name_ref).unwrap();
+                Some(String::from_utf8_lossy(&name_raw).to_string())
+            }
+            gimli::AttributeValue::String(name) => Some(String::from_utf8_lossy(&name).to_string()),
+            _ => None,
+        }
+    }
+
+    fn list_types(&self) -> Result<Vec<Type>, ()> {
+        let mut tree = self.unit.entries_tree(None).unwrap();
+        let mut root = tree.root().unwrap();
+        self.walk_namespace(root, vec![])
+    }
+
+    fn walk_namespace(
+        &self,
+        node: EntriesTreeNode<R>,
+        mut current_namespace: Vec<String>,
+    ) -> Result<Vec<Type>, ()> {
+        let mut tree = self.unit.entries_tree(Some(node.entry().offset())).unwrap();
+        let root = tree.root().unwrap();
+        let namespace =
+            self.extract_string_of(&root.entry().attr(gimli::DW_AT_name).unwrap().unwrap());
+        // Filter namespaces for less output bloat.
+        let mut types = if namespace == Some("mod2".into()) {
+            self.get_types(root, current_namespace.clone()).unwrap()
+        } else {
+            vec![]
+        };
+        let mut children = node.children();
+        while let Ok(Some(child)) = children.next() {
+            let entry = child.entry();
+            match entry.tag() {
+                gimli::DW_TAG_namespace => {
+                    let mut name = String::new();
+                    let mut attrs = entry.attrs();
+                    while let Ok(Some(attr)) = attrs.next() {
+                        match attr.name() {
+                            gimli::DW_AT_name => {
+                                name = self
+                                    .extract_string_of(&attr)
+                                    .unwrap_or_else(|| "<undefined>".to_string());
+                            }
+                            _ => (),
+                        }
+                    }
+                    current_namespace.push(name);
+
+                    types.extend(
+                        self.walk_namespace(child, current_namespace.clone())
+                            .unwrap(),
+                    )
+                }
+                _ => (),
+            };
+        }
+
+        Ok(types)
+    }
+
+    /// Returns the next DIE that marks a namespace in the `entries_cursor`.
     fn get_next_namespace_die(
         &self,
         entries_cursor: &mut EntriesCursor<'abbrev, 'unit>,
@@ -166,7 +235,8 @@ impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
                     while let Ok(Some(attr)) = attrs.next() {
                         match attr.name() {
                             gimli::DW_AT_name => {
-                                name = extract_name(&self.debug_info, attr.value())
+                                name = self
+                                    .extract_string_of(&attr)
                                     .unwrap_or_else(|| "<undefined>".to_string());
                             }
                             _ => (),
@@ -184,159 +254,170 @@ impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
         }
         None
     }
-}
 
-fn extract_type(unit_info: &UnitInfo, node: EntriesTreeNode<R>) -> Option<Type> {
-    // Examine the entry attributes.
-    let entry = node.entry();
-    match entry.tag() {
-        gimli::DW_TAG_structure_type => {
-            let type_name = extract_name(
-                &unit_info.debug_info,
-                entry.attr(gimli::DW_AT_name).unwrap().unwrap().value(),
-            );
-            if !node.entry().has_children() {
-                return Some(Type::PlainVariant(
-                    type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
-                ));
-            }
-            let mut named_children = std::collections::HashMap::new();
-            let mut indexed_children = Vec::new();
-            let mut variants = std::collections::HashMap::new();
+    /// Returns the type that `node` represents.
+    fn extract_type_of(
+        &self,
+        node: EntriesTreeNode<R>,
+        current_namespace: Vec<String>,
+    ) -> Option<Type> {
+        // Examine the entry attributes.
+        let entry = node.entry();
+        match entry.tag() {
+            gimli::DW_TAG_structure_type => {
+                let type_name =
+                    self.extract_string_of(&entry.attr(gimli::DW_AT_name).unwrap().unwrap());
+                if !node.entry().has_children() {
+                    return Some(Type::new(
+                        TypeKind::PlainVariant,
+                        type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
+                        current_namespace.clone(),
+                    ));
+                }
+                let mut named_children = std::collections::HashMap::new();
+                let mut indexed_children = Vec::new();
+                let mut variants = std::collections::HashMap::new();
 
-            let mut children = node.children();
-            while let Ok(Some(child)) = children.next() {
-                let entry = child.entry();
-                match entry.tag() {
-                    gimli::DW_TAG_member => {
-                        let (name, typ) = extract_member(unit_info, child);
-                        if name.starts_with("__") {
-                            indexed_children.insert(
-                                name.strip_prefix("__").unwrap().parse().unwrap(),
-                                typ.unwrap_or(Type::Unknown),
-                            );
-                        } else {
-                            named_children.insert(name, typ.unwrap_or(Type::Unknown));
-                        }
-                    }
-                    gimli::DW_TAG_variant_part => {
-                        while let Ok(Some(child)) = children.next() {
-                            let entry = child.entry();
-                            if entry.tag() == gimli::DW_TAG_structure_type {
-                                let mut name = String::new();
-                                let mut attrs = entry.attrs();
-                                while let Ok(Some(attr)) = attrs.next() {
-                                    match attr.name() {
-                                        gimli::DW_AT_name => {
-                                            name = extract_name(unit_info.debug_info, attr.value())
-                                                .unwrap_or_else(|| "<undefined>".to_string());
-                                        }
-                                        _ => (),
-                                    }
-                                }
-                                variants.insert(
-                                    name,
-                                    extract_type(unit_info, child).unwrap_or(Type::Unknown),
+                let mut children = node.children();
+                while let Ok(Some(child)) = children.next() {
+                    let entry = child.entry();
+                    match entry.tag() {
+                        gimli::DW_TAG_member => {
+                            let (name, typ) =
+                                self.extract_member_of(child, current_namespace.clone());
+                            if name.starts_with("__") {
+                                let index = name.strip_prefix("__").unwrap().parse().unwrap();
+                                indexed_children.insert(
+                                    index,
+                                    typ.unwrap_or(Type::new(
+                                        TypeKind::Unknown,
+                                        index.to_string(),
+                                        current_namespace.clone(),
+                                    )),
                                 );
                             } else {
-                                break;
+                                named_children.insert(
+                                    name.clone(),
+                                    typ.unwrap_or(Type::new(
+                                        TypeKind::Unknown,
+                                        name,
+                                        current_namespace.clone(),
+                                    )),
+                                );
                             }
                         }
-                    }
-                    _tag => {}
-                };
-            }
+                        gimli::DW_TAG_variant_part => {
+                            while let Ok(Some(child)) = children.next() {
+                                let entry = child.entry();
+                                if entry.tag() == gimli::DW_TAG_structure_type {
+                                    let mut name = String::new();
+                                    let mut attrs = entry.attrs();
+                                    while let Ok(Some(attr)) = attrs.next() {
+                                        match attr.name() {
+                                            gimli::DW_AT_name => {
+                                                name = self
+                                                    .extract_string_of(&attr)
+                                                    .unwrap_or_else(|| "<undefined>".to_string());
+                                            }
+                                            _ => (),
+                                        }
+                                    }
+                                    variants.insert(
+                                        name.clone(),
+                                        self.extract_type_of(child, current_namespace.clone())
+                                            .unwrap_or(Type::new(
+                                                TypeKind::Unknown,
+                                                name,
+                                                current_namespace.clone(),
+                                            )),
+                                    );
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        _tag => {}
+                    };
+                }
 
-            if !named_children.is_empty() {
-                return Some(Type::Struct(Struct {
-                    name: type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
-                    named_children,
-                    indexed_children,
-                }));
-            } else if !indexed_children.is_empty() {
-                return Some(Type::Struct(Struct {
-                    name: type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
-                    named_children,
-                    indexed_children,
-                }));
-            } else if !variants.is_empty() {
-                return Some(Type::Enum(Enum {
-                    name: type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
-                    variants,
-                }));
+                if !named_children.is_empty() {
+                    return Some(Type::new(
+                        TypeKind::Struct(Struct {
+                            named_children,
+                            indexed_children,
+                        }),
+                        type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
+                        current_namespace,
+                    ));
+                } else if !indexed_children.is_empty() {
+                    return Some(Type::new(
+                        TypeKind::Struct(Struct {
+                            named_children,
+                            indexed_children,
+                        }),
+                        type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
+                        current_namespace,
+                    ));
+                } else if !variants.is_empty() {
+                    return Some(Type::new(
+                        TypeKind::Enum(Enum { variants }),
+                        type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
+                        current_namespace,
+                    ));
+                }
             }
-        }
-        gimli::DW_TAG_base_type => {
-            if let Ok(Some((name, enc, size))) =
-                get_base_type_info(&unit_info.debug_info.dwarf, &entry)
-            {
-                return Some(elf_test::Type::new_from_base_type(enc, &name, size));
+            gimli::DW_TAG_base_type => {
+                if let Ok(Some((name, enc, size))) =
+                    get_base_type_info(&self.debug_info.dwarf, &entry)
+                {
+                    return Some(Type::new(
+                        elf_test::TypeKind::new_from_base_type(enc, &name, size),
+                        name,
+                        current_namespace,
+                    ));
+                }
             }
-        }
-        t => println!("Unknown type class: {}", t),
-    };
+            t => println!("Unknown type class: {}", t),
+        };
 
-    return None;
-}
-
-fn extract_member(unit_info: &UnitInfo, node: EntriesTreeNode<R>) -> (String, Option<Type>) {
-    let mut name = "".into();
-    let mut typ = None;
-    let mut attrs = node.entry().attrs();
-    while let Ok(Some(attr)) = attrs.next() {
-        match attr.name() {
-            gimli::DW_AT_name => {
-                name = extract_name(&unit_info.debug_info, attr.value())
-                    .unwrap_or_else(|| "<undefined>".to_string());
-            }
-            gimli::DW_AT_type => {
-                let mut tree = unit_info
-                    .unit
-                    .entries_tree(Some(match attr.value() {
-                        AttributeValue::UnitRef(v) => v,
-                        _ => panic!(),
-                    }))
-                    .unwrap();
-                let root = tree.root().unwrap();
-                typ = extract_type(unit_info, root);
-            }
-            _attr => (),
-        }
+        return None;
     }
 
-    return (name, typ);
-}
+    /// Returns the member that `node` represents.
+    fn extract_member_of(
+        &self,
+        node: EntriesTreeNode<R>,
+        current_namespace: Vec<String>,
+    ) -> (String, Option<Type>) {
+        let mut name = "".into();
+        let mut typ = None;
+        let mut attrs = node.entry().attrs();
+        while let Ok(Some(attr)) = attrs.next() {
+            match attr.name() {
+                gimli::DW_AT_name => {
+                    name = self
+                        .extract_string_of(&attr)
+                        .unwrap_or_else(|| "<undefined>".to_string());
+                }
+                gimli::DW_AT_type => {
+                    let mut tree = self
+                        .unit
+                        .entries_tree(Some(match attr.value() {
+                            AttributeValue::UnitRef(v) => v,
+                            _ => panic!(),
+                        }))
+                        .unwrap();
+                    let root = tree.root().unwrap();
+                    typ = self.extract_type_of(root, current_namespace.clone());
+                }
+                _attr => (),
+            }
+        }
 
-#[derive(Debug)]
-pub struct Variable {
-    pub name: String,
-    pub file: String,
-    pub line: u64,
-    pub value: u64,
-    pub typ: Type,
-}
+        return (name, typ);
+    }
 
-type NamespaceDie<'abbrev, 'unit> = gimli::DebuggingInformationEntry<
-    'abbrev,
-    'unit,
-    gimli::EndianReader<gimli::LittleEndian, std::rc::Rc<[u8]>>,
-    usize,
->;
-type EntriesCursor<'abbrev, 'unit> = gimli::EntriesCursor<
-    'abbrev,
-    'unit,
-    gimli::EndianReader<gimli::LittleEndian, std::rc::Rc<[u8]>>,
->;
-
-#[derive(Clone)]
-struct DieCursorState<'abbrev, 'unit> {
-    entries_cursor: EntriesCursor<'abbrev, 'unit>,
-    _depth: isize,
-    name: String,
-    namespace_die: NamespaceDie<'abbrev, 'unit>,
-}
-
-impl<'debuginfo> UnitInfo<'debuginfo> {
+    /// Returns all the variables in the current DIE.
     fn _get_variables(&self, die_cursor_state: &mut DieCursorState) -> Result<Vec<Variable>, ()> {
         let mut variables = vec![];
 
@@ -349,13 +430,14 @@ impl<'debuginfo> UnitInfo<'debuginfo> {
                     file: String::new(),
                     line: u64::max_value(),
                     value: 0,
-                    typ: Type::Unknown,
+                    typ: Type::new(TypeKind::Unknown, String::new(), vec![]),
                 };
                 let mut attrs = current.attrs();
                 while let Ok(Some(attr)) = attrs.next() {
                     match attr.name() {
                         gimli::DW_AT_name => {
-                            variable.name = extract_name(&self.debug_info, attr.value())
+                            variable.name = self
+                                .extract_string_of(&attr)
                                 .unwrap_or_else(|| "<undefined>".to_string());
                         }
                         _ => (),
@@ -368,19 +450,19 @@ impl<'debuginfo> UnitInfo<'debuginfo> {
         Ok(variables)
     }
 
-    fn get_types(&self, die_cursor_state: &mut DieCursorState) -> Result<Vec<Type>, ()> {
+    /// Returns all the types in the current DIE.
+    fn get_types(
+        &self,
+        node: EntriesTreeNode<R>,
+        current_namespace: Vec<String>,
+    ) -> Result<Vec<Type>, ()> {
         let mut types = vec![];
 
-        let mut tree = self
-            .unit
-            .entries_tree(Some(die_cursor_state.namespace_die.offset()))
-            .unwrap();
-        let namespace = tree.root().unwrap();
-        let mut children = namespace.children();
+        let mut children = node.children();
 
         while let Ok(Some(current)) = children.next() {
             if let gimli::DW_TAG_structure_type = current.entry().tag() {
-                if let Some(typ) = extract_type(self, current) {
+                if let Some(typ) = self.extract_type_of(current, current_namespace.clone()) {
                     types.push(typ);
                 }
             };
@@ -388,6 +470,23 @@ impl<'debuginfo> UnitInfo<'debuginfo> {
 
         Ok(types)
     }
+}
+
+#[derive(Debug)]
+pub struct Variable {
+    pub name: String,
+    pub file: String,
+    pub line: u64,
+    pub value: u64,
+    pub typ: Type,
+}
+
+#[derive(Clone)]
+struct DieCursorState<'abbrev, 'unit> {
+    entries_cursor: EntriesCursor<'abbrev, 'unit>,
+    _depth: isize,
+    name: String,
+    namespace_die: NamespaceDie<'abbrev, 'unit>,
 }
 
 fn main() -> Result<(), anyhow::Error> {

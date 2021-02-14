@@ -174,51 +174,59 @@ impl TypePrinter {
 
 #[derive(Debug)]
 pub struct Struct {
-    pub name: String,
     pub named_children: std::collections::HashMap<String, Type>,
     pub indexed_children: Vec<Type>,
 }
 
 #[derive(Debug)]
 pub struct Enum {
-    pub name: String,
     pub variants: std::collections::HashMap<String, Type>,
 }
 
 #[derive(Debug)]
 pub struct Scalar {
-    pub name: String,
     pub printer: TypePrinter,
 }
 
 #[derive(Debug)]
-pub enum Type {
+pub enum TypeKind {
     Struct(Struct),
     Enum(Enum),
     Scalar(Scalar),
-    PlainVariant(String),
+    Pointer(Box<Type>),
+    PlainVariant,
     Unknown,
 }
 
-impl Type {
+#[derive(Debug)]
+pub struct Type {
+    kind: TypeKind,
+    name: String,
+    namespace: Vec<String>,
+}
+
+impl TypeKind {
     pub fn new_from_base_type(ate: DwAte, name: &str, size: usize) -> Self {
-        Type::Scalar(Scalar {
-            name: name.into(),
+        TypeKind::Scalar(Scalar {
             printer: TypePrinter {
                 range: 0..size,
                 printer: BaseType::from_base_type(ate, name, size),
             },
         })
     }
+}
+
+impl Type {
+    pub fn new(kind: TypeKind, name: String, namespace: Vec<String>) -> Self {
+        Self {
+            kind,
+            name,
+            namespace,
+        }
+    }
 
     pub fn name(&self) -> &str {
-        match self {
-            Type::Struct(structure) => &structure.name,
-            Type::Enum(enummeration) => &enummeration.name,
-            Type::Scalar(scalar) => &scalar.name,
-            Type::PlainVariant(name) => &name,
-            Type::Unknown => "<unknown type class>",
-        }
+        &self.name
     }
 
     pub fn print(&self, buf: &[u8]) {
@@ -232,9 +240,9 @@ impl Type {
 
     fn write_internal(&self, w: &mut impl Write, depth: usize, buf: &[u8]) -> std::io::Result<()> {
         let pad = " ".repeat(depth * 4);
-        match self {
-            Type::Struct(structure) => {
-                println!("{}{}: {{", &pad, structure.name);
+        match &self.kind {
+            TypeKind::Struct(structure) => {
+                println!("{}{}: {{", &pad, self.name);
 
                 for (_name, typ) in &structure.named_children {
                     typ.write_internal(w, depth + 1, buf)?;
@@ -242,7 +250,7 @@ impl Type {
 
                 println!("{}}},", &pad);
             }
-            Type::Enum(_enummeration) => {
+            TypeKind::Enum(_enummeration) => {
                 todo!()
                 // if let Some(n) = n {
                 //     println!("{}{}: {{", &pad, n);
@@ -256,19 +264,23 @@ impl Type {
 
                 // println!("{}}},", &pad);
             }
-            Type::Scalar(scalar) => {
-                print!("{}{}: ", &pad, scalar.name);
+            TypeKind::Scalar(scalar) => {
+                print!("{}{}: ", &pad, self.name);
 
                 scalar.printer.write(w, buf)?;
 
                 println!(",");
             }
-            Type::PlainVariant(name) => {
-                print!("{}{}: ", &pad, name);
+            TypeKind::PlainVariant => {
+                print!("{}{}: ", &pad, self.name);
 
                 println!(",");
             }
-            Type::Unknown => (),
+            TypeKind::Pointer(typ) => {
+                print!("*");
+                typ.write_internal(w, depth, buf)?;
+            }
+            TypeKind::Unknown => (),
         }
 
         Ok(())
