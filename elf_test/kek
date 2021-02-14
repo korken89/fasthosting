@@ -1,0 +1,69 @@
+opts: "../minimal_program/target/thumbv7em-none-eabihf/debug/app"
+Namespace app
+struct
+MyEnum
+Attribute { name: DwAt(15), value: UnitRef(UnitOffset(be)) }
+VALUE
+UNIT
+Attribute { name: DwAt(3), value: DebugStrRef(DebugStrOffset(1974e)) }
+Attribute { name: DwAt(b), value: Data1(c) }
+Attribute { name: DwAt(88), value: Udata(4) }
+Attribute { name: DwAt(3), value: DebugStrRef(DebugStrOffset(1e991)) }
+Attribute { name: DwAt(b), value: Data1(c) }
+Attribute { name: DwAt(88), value: Udata(4) }
+Attribute { name: DwAt(3), value: DebugStrRef(DebugStrOffset(2c558)) }
+Attribute { name: DwAt(b), value: Data1(c) }
+Attribute { name: DwAt(88), value: Udata(4) }
+[]
+Namespace mod1
+[]
+Namespace mod2
+struct
+MyStruct
+Attribute { name: DwAt(3), value: DebugStrRef(DebugStrOffset(2325b)) }
+Attribute { name: DwAt(49), value: UnitRef(UnitOffset(1d5)) }
+VALUE
+UNIT
+Attribute { name: DwAt(88), value: Udata(4) }
+Attribute { name: DwAt(38), value: Data1(0) }
+Attribute { name: DwAt(3), value: DebugStrRef(DebugStrOffset(27ee8)) }
+Attribute { name: DwAt(49), value: UnitRef(UnitOffset(68)) }
+VALUE
+UNIT
+STRUCTURE
+Some("MyStruct2")
+CHILD
+MEMBER Some("a") Ok(Some(Attribute { name: DwAt(49), value: UnitRef(UnitOffset(1d5)) }))
+VALUE
+UNIT
+Attribute { name: DwAt(88), value: Udata(4) }
+Attribute { name: DwAt(38), value: Data1(4) }
+struct
+MyStruct2
+Attribute { name: DwAt(3), value: DebugStrRef(DebugStrOffset(1e98f)) }
+Attribute { name: DwAt(49), value: UnitRef(UnitOffset(1d5)) }
+VALUE
+UNIT
+Attribute { name: DwAt(88), value: Udata(4) }
+Attribute { name: DwAt(38), value: Data1(0) }
+Attribute { name: DwAt(3), value: DebugStrRef(DebugStrOffset(21753)) }
+Attribute { name: DwAt(49), value: UnitRef(UnitOffset(1dc)) }
+VALUE
+UNIT
+Attribute { name: DwAt(88), value: Udata(4) }
+Attribute { name: DwAt(38), value: Data1(4) }
+[]
+Namespace __cortex_m_rt_init
+[]
+Namespace core
+[]
+Namespace ptr
+[]
+Namespace str
+[]
+Namespace {{impl}}
+[]
+Namespace cortex_m
+[]
+Namespace asm
+[]

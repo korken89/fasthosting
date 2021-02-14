@@ -173,29 +173,50 @@ impl TypePrinter {
 }
 
 #[derive(Debug)]
-pub enum PrinterTree {
-    Struct(Option<String>, Vec<PrinterTree>),
-    Enum(Option<String>, Vec<(String, PrinterTree)>),
-    Variable(Option<String>, TypePrinter),
+pub struct Struct {
+    pub name: String,
+    pub named_children: std::collections::HashMap<String, Type>,
+    pub indexed_children: Vec<Type>,
 }
 
-impl PrinterTree {
+#[derive(Debug)]
+pub struct Enum {
+    pub name: String,
+    pub variants: std::collections::HashMap<String, Type>,
+}
+
+#[derive(Debug)]
+pub struct Scalar {
+    pub name: String,
+    pub printer: TypePrinter,
+}
+
+#[derive(Debug)]
+pub enum Type {
+    Struct(Struct),
+    Enum(Enum),
+    Scalar(Scalar),
+    Unknown,
+}
+
+impl Type {
     pub fn new_from_base_type(ate: DwAte, name: &str, size: usize) -> Self {
-        PrinterTree::Variable(
-            None,
-            TypePrinter {
+        Type::Scalar(Scalar {
+            name: name.into(),
+            printer: TypePrinter {
                 range: 0..size,
                 printer: BaseType::from_base_type(ate, name, size),
             },
-        )
+        })
     }
 
-    pub fn new_struct() -> Self {
-        PrinterTree::Struct(None, Vec::new())
-    }
-
-    pub fn new_enum() -> Self {
-        PrinterTree::Enum(None, Vec::new())
+    pub fn name(&self) -> &str {
+        match self {
+            Type::Struct(structure) => &structure.name,
+            Type::Enum(enummeration) => &enummeration.name,
+            Type::Scalar(scalar) => &scalar.name,
+            Type::Unknown => "<unknown type class>",
+        }
     }
 
     pub fn print(&self, buf: &[u8]) {
@@ -210,20 +231,16 @@ impl PrinterTree {
     fn write_internal(&self, w: &mut impl Write, depth: usize, buf: &[u8]) -> std::io::Result<()> {
         let pad = " ".repeat(depth * 4);
         match self {
-            PrinterTree::Struct(n, vec) => {
-                if let Some(n) = n {
-                    println!("{}{}: {{", &pad, n);
-                } else {
-                    println!("{}{{", &pad);
-                }
+            Type::Struct(structure) => {
+                println!("{}{}: {{", &pad, structure.name);
 
-                for t in vec {
-                    t.write_internal(w, depth + 1, buf)?;
+                for (_name, typ) in &structure.named_children {
+                    typ.write_internal(w, depth + 1, buf)?;
                 }
 
                 println!("{}}},", &pad);
             }
-            PrinterTree::Enum(_n, _vec) => {
+            Type::Enum(_enummeration) => {
                 todo!()
                 // if let Some(n) = n {
                 //     println!("{}{}: {{", &pad, n);
@@ -237,17 +254,14 @@ impl PrinterTree {
 
                 // println!("{}}},", &pad);
             }
-            PrinterTree::Variable(n, t) => {
-                if let Some(n) = n {
-                    print!("{}{}: ", &pad, n);
-                } else {
-                    print!("{}", &pad);
-                }
+            Type::Scalar(scalar) => {
+                print!("{}{}: ", &pad, scalar.name);
 
-                t.write(w, buf)?;
+                scalar.printer.write(w, buf)?;
 
                 println!(",");
             }
+            Type::Unknown => (),
         }
 
         Ok(())
