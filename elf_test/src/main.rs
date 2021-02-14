@@ -158,8 +158,6 @@ impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
         &self,
         entries_cursor: &mut EntriesCursor<'abbrev, 'unit>,
     ) -> Option<DieCursorState<'abbrev, 'unit>> {
-        // let mut entries_cursor = self.unit.entries();
-
         while let Ok(Some((depth, current))) = entries_cursor.next_dfs() {
             match current.tag() {
                 gimli::DW_TAG_namespace => {
@@ -197,22 +195,29 @@ fn extract_type(unit_info: &UnitInfo, node: EntriesTreeNode<R>) -> Option<Type> 
                 &unit_info.debug_info,
                 entry.attr(gimli::DW_AT_name).unwrap().unwrap().value(),
             );
+            if !node.entry().has_children() {
+                return Some(Type::PlainVariant(
+                    type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
+                ));
+            }
             let mut named_children = std::collections::HashMap::new();
+            let mut indexed_children = Vec::new();
             let mut variants = std::collections::HashMap::new();
 
             let mut children = node.children();
             while let Ok(Some(child)) = children.next() {
-                // Recursively process a child.
                 let entry = child.entry();
-                // let type_name = extract_name(
-                //     &unit_info.debug_info,
-                //     entry.attr(gimli::DW_AT_name).unwrap().unwrap().value(),
-                // );
-                // println!("{:?}", type_name);
                 match entry.tag() {
                     gimli::DW_TAG_member => {
                         let (name, typ) = extract_member(unit_info, child);
-                        named_children.insert(name, typ.unwrap_or(Type::Unknown));
+                        if name.starts_with("__") {
+                            indexed_children.insert(
+                                name.strip_prefix("__").unwrap().parse().unwrap(),
+                                typ.unwrap_or(Type::Unknown),
+                            );
+                        } else {
+                            named_children.insert(name, typ.unwrap_or(Type::Unknown));
+                        }
                     }
                     gimli::DW_TAG_variant_part => {
                         while let Ok(Some(child)) = children.next() {
@@ -245,8 +250,14 @@ fn extract_type(unit_info: &UnitInfo, node: EntriesTreeNode<R>) -> Option<Type> 
             if !named_children.is_empty() {
                 return Some(Type::Struct(Struct {
                     name: type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
-                    named_children: named_children,
-                    indexed_children: vec![],
+                    named_children,
+                    indexed_children,
+                }));
+            } else if !indexed_children.is_empty() {
+                return Some(Type::Struct(Struct {
+                    name: type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
+                    named_children,
+                    indexed_children,
                 }));
             } else if !variants.is_empty() {
                 return Some(Type::Enum(Enum {
@@ -256,10 +267,6 @@ fn extract_type(unit_info: &UnitInfo, node: EntriesTreeNode<R>) -> Option<Type> 
             }
         }
         gimli::DW_TAG_base_type => {
-            // let type_name = extract_name(
-            //     &unit_info.debug_info,
-            //     entry.attr(gimli::DW_AT_name).unwrap().unwrap().value(),
-            // );
             if let Ok(Some((name, enc, size))) =
                 get_base_type_info(&unit_info.debug_info.dwarf, &entry)
             {
@@ -293,7 +300,7 @@ fn extract_member(unit_info: &UnitInfo, node: EntriesTreeNode<R>) -> (String, Op
                 let root = tree.root().unwrap();
                 typ = extract_type(unit_info, root);
             }
-            _ => (),
+            _attr => (),
         }
     }
 

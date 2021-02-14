@@ -196,6 +196,7 @@ pub enum Type {
     Struct(Struct),
     Enum(Enum),
     Scalar(Scalar),
+    PlainVariant(String),
     Unknown,
 }
 
@@ -215,6 +216,7 @@ impl Type {
             Type::Struct(structure) => &structure.name,
             Type::Enum(enummeration) => &enummeration.name,
             Type::Scalar(scalar) => &scalar.name,
+            Type::PlainVariant(name) => &name,
             Type::Unknown => "<unknown type class>",
         }
     }
@@ -258,6 +260,11 @@ impl Type {
                 print!("{}{}: ", &pad, scalar.name);
 
                 scalar.printer.write(w, buf)?;
+
+                println!(",");
+            }
+            Type::PlainVariant(name) => {
+                print!("{}{}: ", &pad, name);
 
                 println!(",");
             }
