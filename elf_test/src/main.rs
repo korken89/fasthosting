@@ -47,18 +47,9 @@ fn generate_printers(elf: &[u8]) -> Result<TypePrinters, anyhow::Error> {
 
     let debug_info = DebugInfo::from_raw(elf).unwrap();
     let mut units = debug_info.get_units();
-    'outer: while let Some(unit_info) = debug_info.get_next_unit_info(&mut units) {
-        let mut entries = unit_info.unit.entries();
+    while let Some(unit_info) = debug_info.get_next_unit_info(&mut units) {
         let types = unit_info.list_types().unwrap();
         printers.extend(types.into_iter().map(|t| (t.name().to_string(), t)));
-        // while let Some(die_cursor_state) = &mut unit_info.get_next_namespace_die(&mut entries) {
-        //     let types = unit_info.get_types(&mut die_cursor_state.clone()).unwrap();
-        //     printers.extend(types.into_iter().map(|t| (t.name().to_string(), t)));
-        //     // Early abort for less bloat.
-        //     if die_cursor_state.name == "mod2" {
-        //         break 'outer;
-        //     }
-        // }
     }
 
     println!("Printers: {:#?}", printers);
@@ -172,7 +163,7 @@ impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
 
     fn list_types(&self) -> Result<Vec<Type>, ()> {
         let mut tree = self.unit.entries_tree(None).unwrap();
-        let mut root = tree.root().unwrap();
+        let root = tree.root().unwrap();
         self.walk_namespace(root, vec![])
     }
 
@@ -220,39 +211,6 @@ impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
         }
 
         Ok(types)
-    }
-
-    /// Returns the next DIE that marks a namespace in the `entries_cursor`.
-    fn get_next_namespace_die(
-        &self,
-        entries_cursor: &mut EntriesCursor<'abbrev, 'unit>,
-    ) -> Option<DieCursorState<'abbrev, 'unit>> {
-        while let Ok(Some((depth, current))) = entries_cursor.next_dfs() {
-            match current.tag() {
-                gimli::DW_TAG_namespace => {
-                    let mut name = String::new();
-                    let mut attrs = current.attrs();
-                    while let Ok(Some(attr)) = attrs.next() {
-                        match attr.name() {
-                            gimli::DW_AT_name => {
-                                name = self
-                                    .extract_string_of(&attr)
-                                    .unwrap_or_else(|| "<undefined>".to_string());
-                            }
-                            _ => (),
-                        }
-                    }
-                    return Some(DieCursorState {
-                        _depth: depth,
-                        name: name,
-                        namespace_die: current.clone(),
-                        entries_cursor: entries_cursor.clone(),
-                    });
-                }
-                _ => (),
-            };
-        }
-        None
     }
 
     /// Returns the type that `node` represents.
