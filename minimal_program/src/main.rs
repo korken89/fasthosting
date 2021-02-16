@@ -12,6 +12,7 @@ pub mod mod1 {
             pub a: i32,
             pub c: u32,
         }
+        pub struct MyStruct3(pub u8);
     }
 }
 
@@ -22,9 +23,11 @@ enum MyEnum {
 }
 
 use cortex_m_rt::entry;
+use mod1::mod2::MyStruct3;
 // use cortex_m_semihosting::hprintln;
 use panic_halt as _;
-use stm32l4xx_hal as _;
+// use stm32l4xx_hal as _;
+pub use nrf52840_hal as hal;
 
 static mut TEST1: mod1::mod2::MyStruct = mod1::mod2::MyStruct {
     b: 2,
@@ -41,6 +44,8 @@ static mut TEST5: () = ();
 
 static mut TEST6: [u8; 13] = [0; 13];
 
+static mut TEST7: MyStruct3 = MyStruct3(42);
+
 #[entry]
 fn init() -> ! {
     let test: u32 = 1;
@@ -54,6 +59,7 @@ fn init() -> ! {
             core::ptr::read_volatile(&TEST4);
             core::ptr::read_volatile(&TEST5);
             core::ptr::read_volatile(&TEST6);
+            core::ptr::read_volatile(&TEST7);
         }
         cortex_m::asm::delay(1_000_000);
 
@@ -66,5 +72,9 @@ fn init() -> ! {
         cortex_m::asm::delay(1_000_000);
 
         log0_target::log!("Look what I got: {}", test);
+
+        log0_target::log!("Look what I got: {}", TEST3);
+
+        log0_target::log!("Look what I got: {}", TEST7);
     }
 }

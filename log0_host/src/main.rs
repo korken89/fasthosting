@@ -1,4 +1,5 @@
 use anyhow::Result;
+use elf_test::generate_printers;
 use gimli as _;
 use log0_host::{bytes_to_read, fmt, parser::Parser};
 use probe_rs::{
@@ -44,7 +45,7 @@ fn main() -> Result<()> {
     println!("Probe speed: {} kHz", speed_khz);
 
     // Attach to a chip.
-    let mut session = probe.attach("stm32l412cbu")?;
+    let mut session = probe.attach("nrf52840")?;
 
     print!("Spinning up the binary ...");
     download_file_with_options(
@@ -78,6 +79,8 @@ fn main() -> Result<()> {
         buffer_address,
         buffer_size,
     } = fmt::extract_format_and_type_strings(&elf)?;
+
+    let type_printers = generate_printers(&bytes).unwrap();
 
     // Ctrl-C handling
     let running = Arc::new(AtomicBool::new(true));
@@ -135,16 +138,17 @@ fn main() -> Result<()> {
             parser.push(&read);
 
             while let Some(packet) = parser.try_parse() {
+                let string = map_strings
+                    .get(&packet.string_loc)
+                    .unwrap_or(&"String not found in hashmap?!?!?!");
+                let typ = map_types
+                    .get(&packet.type_loc)
+                    .unwrap_or(&"String not found in hashmap?!?!?!");
                 println!(
                     "String: '{}', Type string: '{}', Buffer: {:x?}",
-                    map_strings
-                        .get(&packet.string_loc)
-                        .unwrap_or(&"String not found in hashmap?!?!?!"),
-                    map_types
-                        .get(&packet.type_loc)
-                        .unwrap_or(&"String not found in hashmap?!?!?!"),
-                    packet.buffer
+                    string, typ, packet.buffer
                 );
+                type_printers.print(typ.split(':').last().unwrap(), &packet.buffer);
 
                 // println!("packet: {:x?}", p);
             }
