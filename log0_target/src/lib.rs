@@ -105,8 +105,13 @@ macro_rules! log {
 
         const FMT: &'static str = $str;
 
-        #[link_section = ".fasthosting"]
-        static S: [u8; FMT.as_bytes().len()] = unsafe {
+        // To find the type in the DWARF we add a tag to the section, the static and a function
+        // which has as a generic parameter the type we want to print. This will allow us to
+        // backtrack from the address to S_xxx, to link_section, to extract ABCD, to search the
+        // DWARF for the `__dwarffmt_this_is_for_searching_the_dwarf_ABCD`
+
+        #[link_section = ".fasthosting.ABCD"]
+        static S_ABCD: [u8; FMT.as_bytes().len()] = unsafe {
             *log0_target::Transmute::<*const [u8; FMT.len()], &[u8; FMT.as_bytes().len()]> {
                 from: FMT.as_ptr() as *const [u8; FMT.as_bytes().len()],
             }
@@ -116,8 +121,23 @@ macro_rules! log {
         let s = unsafe { log0_target::get_type_str(&$var) };
         let v = unsafe { log0_target::any_to_byte_slice(&$var) };
 
+        // Trick to get the type of T via DWARF
+        unsafe fn __dwarffmt_this_is_for_searching_the_dwarf_ABCD<T>(
+            sym: *const u8,
+            type_str: *const u8,
+            data: &[u8],
+            _t: &T,
+        ) {
+            log0_target::LOG0_CURSORS.write_frame(sym, type_str, data);
+        }
+
         unsafe {
-            log0_target::LOG0_CURSORS.write_frame(&S as *const _, s.as_ptr() as *const _, v);
+            __dwarffmt_this_is_for_searching_the_dwarf_ABCD(
+                &S_ABCD as *const _,
+                s.as_ptr() as *const _,
+                v,
+                &$var,
+            );
         }
     }};
 }
