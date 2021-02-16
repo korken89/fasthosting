@@ -140,16 +140,16 @@ fn main() -> Result<()> {
             parser.push(&read);
 
             while let Some(packet) = parser.try_parse() {
-                let string = map_strings
-                    .get(&packet.string_loc)
-                    .unwrap_or(&"String not found in hashmap?!?!?!");
+                // let string = map_strings
+                //     .get(&packet.string_loc)
+                //     .unwrap_or(&"String not found in hashmap?!?!?!");
                 let typ = map_types
                     .get(&packet.type_loc)
                     .unwrap_or(&"String not found in hashmap?!?!?!");
-                println!(
-                    "String: '{}', Type string: '{}', Buffer: {:x?}",
-                    string, typ, packet.buffer
-                );
+                // println!(
+                //     "String: '{}', Type string: '{}', Buffer: {:x?}",
+                //     string, typ, packet.buffer
+                // );
                 type_printers.print(typ.split(':').last().unwrap(), &packet.buffer);
 
                 // println!("packet: {:x?}", p);

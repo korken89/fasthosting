@@ -17,7 +17,7 @@ pub mod mod1 {
 }
 
 enum MyEnum {
-    Var1,
+    Var1 { x: u8, y: f32 },
     Var2((u8, f32)),
     Var3,
 }
@@ -45,6 +45,10 @@ static mut TEST5: () = ();
 static mut TEST6: [u8; 13] = [0; 13];
 
 static mut TEST7: MyStruct3 = MyStruct3(42);
+
+static mut TEST8: MyEnum = MyEnum::Var1 { x: 42, y: 5.0 };
+
+static mut TEST9: MyEnum = MyEnum::Var3;
 
 #[entry]
 fn init() -> ! {
@@ -78,5 +82,9 @@ fn init() -> ! {
         log0_target::log!("Look what I got: {}", TEST7);
 
         log0_target::log!("Look what I got: {}", TEST6);
+
+        log0_target::log!("Look what I got: {}", TEST8);
+
+        log0_target::log!("Look what I got: {}", TEST9);
     }
 }

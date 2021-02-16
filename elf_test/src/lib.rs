@@ -180,7 +180,6 @@ pub struct TypePrinters(pub HashMap<String, Type>);
 
 impl TypePrinters {
     pub fn print(&self, type_name: &str, buffer: &[u8]) {
-        println!("{}", type_name);
         if let Some(typ) = self.0.get(type_name) {
             let mut out = std::io::stdout();
             let _ = typ.write(&mut out, buffer);
@@ -251,29 +250,53 @@ impl Type {
     }
 
     pub fn write(&self, w: &mut impl Write, buf: &[u8]) -> std::io::Result<()> {
-        self.write_internal(w, 0, buf)
+        self.write_internal(w, true, 0, buf)
     }
 
-    fn write_internal(&self, w: &mut impl Write, depth: usize, buf: &[u8]) -> std::io::Result<()> {
+    fn write_internal(
+        &self,
+        w: &mut impl Write,
+        first: bool,
+        depth: usize,
+        buf: &[u8],
+    ) -> std::io::Result<()> {
         let pad = " ".repeat(depth * 4);
         match &self.kind {
             TypeKind::Struct(structure) => {
                 if !structure.named_children.is_empty() {
-                    println!("{}{}: {{", &pad, self.name);
+                    println!(
+                        "{}{{",
+                        if first {
+                            format!("{} ", self.name)
+                        } else {
+                            "".into()
+                        }
+                    );
 
-                    for (_name, typ) in &structure.named_children {
-                        typ.write_internal(w, depth + 1, &buf[self.offset..])?;
+                    for (name, typ) in &structure.named_children {
+                        let pad = " ".repeat((depth + 1) * 4);
+                        print!("{}{}: ", &pad, name);
+                        typ.write_internal(w, false, depth + 1, &buf[self.offset..])?;
                     }
 
-                    println!("{}}},", &pad);
+                    println!("{}}}{}", &pad, if first { "" } else { "," });
                 } else if !structure.indexed_children.is_empty() {
-                    println!("{}{}: (", &pad, self.name);
+                    println!(
+                        "{}(",
+                        if first {
+                            format!("{} ", self.name)
+                        } else {
+                            "".into()
+                        }
+                    );
 
                     for (_i, typ) in structure.indexed_children.iter().enumerate() {
-                        typ.write_internal(w, depth + 1, &buf[self.offset..])?;
+                        let pad = " ".repeat((depth + 1) * 4);
+                        print!("{}", &pad);
+                        typ.write_internal(w, false, depth + 1, &buf[self.offset..])?;
                     }
 
-                    println!("{}),", &pad);
+                    println!("{}){}", &pad, if first { "" } else { "," });
                 }
             }
             TypeKind::Enum(enummeration) => {
@@ -281,42 +304,28 @@ impl Type {
                 let discriminant = buf[enummeration.discriminant_offset] as usize;
                 for (variant_name, variant) in &enummeration.variants {
                     if variant.variant_value == discriminant {
-                        if let TypeKind::PlainVariant = variant.kind {
-                            println!("{}", variant_name);
-                        } else {
-                            println!("{} {{", variant_name);
-                            variant.write_internal(w, depth + 1, &buf[self.offset..])?;
-                            println!("}}");
-                        }
+                        print!("{} ", variant_name);
+                        variant.write_internal(w, false, depth, &buf[self.offset..])?;
                     }
                 }
-                // if let Some(n) = n {
-                //     println!("{}{}: {{", &pad, n);
-                // } else {
-                //     println!("{}{{", &pad);
-                // }
-
-                // for t in vec {
-                //     t.write_internal(w, depth + 1, buf)?;
-                // }
-
-                // println!("{}}},", &pad);
             }
             TypeKind::Scalar(scalar) => {
-                print!("{}{}: ", &pad, self.name);
-
                 scalar.printer.write(w, &buf[self.offset..])?;
 
-                println!(",");
+                if first {
+                } else {
+                    println!(",");
+                }
             }
             TypeKind::PlainVariant => {
-                print!("{}{}: ", &pad, self.name);
-
-                println!(",");
+                if first {
+                } else {
+                    println!(",");
+                }
             }
             TypeKind::Pointer(typ) => {
                 print!("*");
-                typ.write_internal(w, depth, buf)?;
+                typ.write_internal(w, first, depth, buf)?;
             }
             TypeKind::Unknown => (),
         }
