@@ -269,7 +269,7 @@ impl Type {
                 } else if !structure.indexed_children.is_empty() {
                     println!("{}{}: (", &pad, self.name);
 
-                    for (i, typ) in structure.indexed_children.iter().enumerate() {
+                    for (_i, typ) in structure.indexed_children.iter().enumerate() {
                         typ.write_internal(w, depth + 1, &buf[self.offset..])?;
                     }
 
