@@ -175,6 +175,7 @@ impl TypePrinter {
     }
 }
 
+#[derive(Debug)]
 pub struct TypePrinters(pub HashMap<String, Type>);
 
 impl TypePrinters {
@@ -196,6 +197,7 @@ pub struct Struct {
 #[derive(Debug, Clone)]
 pub struct Enum {
     pub variants: std::collections::HashMap<String, Type>,
+    pub discriminant_offset: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -219,6 +221,7 @@ pub struct Type {
     kind: TypeKind,
     name: String,
     namespace: Vec<String>,
+    pub variant_value: usize,
 }
 
 impl TypeKind {
@@ -239,17 +242,13 @@ impl Type {
             name,
             namespace,
             offset,
+            variant_value: 0,
         }
     }
 
     pub fn name(&self) -> &str {
         &self.name
     }
-
-    // pub fn print(&self, buf: &[u8]) {
-    //     let out = std::io::stdout();
-    //     self.write_internal(&mut out.lock(), 0, buf).unwrap();
-    // }
 
     pub fn write(&self, w: &mut impl Write, buf: &[u8]) -> std::io::Result<()> {
         self.write_internal(w, 0, buf)
@@ -259,16 +258,38 @@ impl Type {
         let pad = " ".repeat(depth * 4);
         match &self.kind {
             TypeKind::Struct(structure) => {
-                println!("{}{}: {{", &pad, self.name);
+                if !structure.named_children.is_empty() {
+                    println!("{}{}: {{", &pad, self.name);
 
-                for (_name, typ) in &structure.named_children {
-                    typ.write_internal(w, depth + 1, &buf[self.offset..])?;
+                    for (_name, typ) in &structure.named_children {
+                        typ.write_internal(w, depth + 1, &buf[self.offset..])?;
+                    }
+
+                    println!("{}}},", &pad);
+                } else if !structure.indexed_children.is_empty() {
+                    println!("{}{}: (", &pad, self.name);
+
+                    for (i, typ) in structure.indexed_children.iter().enumerate() {
+                        typ.write_internal(w, depth + 1, &buf[self.offset..])?;
+                    }
+
+                    println!("{}),", &pad);
                 }
-
-                println!("{}}},", &pad);
             }
-            TypeKind::Enum(_enummeration) => {
-                todo!()
+            TypeKind::Enum(enummeration) => {
+                print!("{}{}::", &pad, self.name);
+                let discriminant = buf[enummeration.discriminant_offset] as usize;
+                for (variant_name, variant) in &enummeration.variants {
+                    if variant.variant_value == discriminant {
+                        if let TypeKind::PlainVariant = variant.kind {
+                            println!("{}", variant_name);
+                        } else {
+                            println!("{} {{", variant_name);
+                            variant.write_internal(w, depth + 1, &buf[self.offset..])?;
+                            println!("}}");
+                        }
+                    }
+                }
                 // if let Some(n) = n {
                 //     println!("{}{}: {{", &pad, n);
                 // } else {
@@ -317,8 +338,6 @@ pub fn generate_printers(elf: &[u8]) -> Result<TypePrinters, anyhow::Error> {
         let types = unit_info.list_types().unwrap();
         printers.extend(types.into_iter().map(|t| (t.name().to_string(), t)));
     }
-
-    println!("Printers: {:#?}", printers);
 
     Ok(TypePrinters(printers))
 }
@@ -440,14 +459,9 @@ impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
     ) -> Result<Vec<Type>, ()> {
         let mut tree = self.unit.entries_tree(Some(node.entry().offset())).unwrap();
         let root = tree.root().unwrap();
-        let namespace =
-            self.extract_string_of(&root.entry().attr(gimli::DW_AT_name).unwrap().unwrap());
-        // Filter namespaces for less output bloat.
-        let mut types = if namespace == Some("mod2".into()) {
-            self.get_types(root, current_namespace.clone()).unwrap()
-        } else {
-            vec![]
-        };
+        // let namespace =
+        //     self.extract_string_of(&root.entry().attr(gimli::DW_AT_name).unwrap().unwrap());
+        let mut types = self.get_types(root, current_namespace.clone()).unwrap();
         let mut children = node.children();
         while let Ok(Some(child)) = children.next() {
             let entry = child.entry();
@@ -484,7 +498,7 @@ impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
         &self,
         node: EntriesTreeNode<R>,
         current_namespace: Vec<String>,
-        mut offset: usize,
+        offset: usize,
     ) -> Option<Type> {
         // Examine the entry attributes.
         let entry = node.entry();
@@ -503,10 +517,12 @@ impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
                 let mut named_children = std::collections::HashMap::new();
                 let mut indexed_children = Vec::new();
                 let mut variants = std::collections::HashMap::new();
+                let mut discriminant_offset: usize = 0;
 
                 let mut children = node.children();
                 while let Ok(Some(child)) = children.next() {
                     let entry = child.entry();
+                    println!("{}", entry.tag());
                     match entry.tag() {
                         gimli::DW_TAG_member => {
                             let mut attrs = entry.attrs();
@@ -541,33 +557,117 @@ impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
                             }
                         }
                         gimli::DW_TAG_variant_part => {
+                            let mut attrs = entry.attrs();
+                            while let Ok(Some(attr)) = attrs.next() {
+                                match attr.name() {
+                                    gimli::DW_AT_discr => {
+                                        let mut tree = self
+                                            .unit
+                                            .entries_tree(Some(match attr.value() {
+                                                AttributeValue::UnitRef(v) => v,
+                                                _ => panic!(),
+                                            }))
+                                            .unwrap();
+                                        let discriminant = tree.root().unwrap();
+                                        let discriminant = discriminant.entry();
+
+                                        let mut attrs = discriminant.attrs();
+                                        while let Ok(Some(attr)) = attrs.next() {
+                                            match attr.name() {
+                                                gimli::DW_AT_data_member_location => {
+                                                    if let AttributeValue::Udata(s) = attr.value() {
+                                                        discriminant_offset = s.try_into().unwrap();
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                    _attr => println!("{}", _attr),
+                                }
+                            }
+
+                            let mut children = child.children();
                             while let Ok(Some(child)) = children.next() {
                                 let entry = child.entry();
-                                if entry.tag() == gimli::DW_TAG_structure_type {
-                                    let mut name = String::new();
+
+                                if entry.tag() == gimli::DW_TAG_variant {
+                                    println!("VARIANT");
+                                    let mut discriminant_value: usize = 0;
                                     let mut attrs = entry.attrs();
                                     while let Ok(Some(attr)) = attrs.next() {
                                         match attr.name() {
-                                            gimli::DW_AT_name => {
-                                                name = self
-                                                    .extract_string_of(&attr)
-                                                    .unwrap_or_else(|| "<undefined>".to_string());
+                                            gimli::DW_AT_discr_value => {
+                                                println!("XXX");
+                                                if let AttributeValue::Data1(s) = attr.value() {
+                                                    discriminant_value = s.try_into().unwrap();
+                                                    println!("{}", discriminant_value);
+                                                }
                                             }
-                                            _ => (),
+                                            _ => {}
                                         }
                                     }
-                                    variants.insert(
-                                        name.clone(),
-                                        self.extract_type_of(child, current_namespace.clone(), 0)
-                                            .unwrap_or(Type::new(
-                                                TypeKind::Unknown,
-                                                name,
-                                                current_namespace.clone(),
-                                                offset,
-                                            )),
-                                    );
-                                } else {
-                                    break;
+
+                                    let mut children = child.children();
+                                    while let Ok(Some(child)) = children.next() {
+                                        let mut variant_offset: usize = 0;
+                                        let mut name = String::new();
+                                        let entry = child.entry();
+
+                                        if entry.tag() == gimli::DW_TAG_member {
+                                            let mut type_attr = None;
+                                            let mut attrs = entry.attrs();
+                                            while let Ok(Some(attr)) = attrs.next() {
+                                                match attr.name() {
+                                                    gimli::DW_AT_data_member_location => {
+                                                        if let AttributeValue::Udata(s) =
+                                                            attr.value()
+                                                        {
+                                                            variant_offset = s.try_into().unwrap();
+                                                        }
+                                                    }
+                                                    gimli::DW_AT_name => {
+                                                        name = self
+                                                            .extract_string_of(&attr)
+                                                            .unwrap_or_else(|| {
+                                                                "<undefined>".to_string()
+                                                            });
+                                                    }
+                                                    gimli::DW_AT_type => type_attr = Some(attr),
+                                                    _ => {}
+                                                }
+                                            }
+
+                                            if let Some(type_attr) = type_attr {
+                                                let mut tree = self
+                                                    .unit
+                                                    .entries_tree(Some(match type_attr.value() {
+                                                        AttributeValue::UnitRef(v) => v,
+                                                        _ => panic!(),
+                                                    }))
+                                                    .unwrap();
+                                                let root = tree.root().unwrap();
+                                                variants.insert(
+                                                    name.clone(),
+                                                    self.extract_type_of(
+                                                        root,
+                                                        current_namespace.clone(),
+                                                        variant_offset,
+                                                    )
+                                                    .map(|mut t| {
+                                                        t.variant_value = discriminant_value;
+                                                        t
+                                                    })
+                                                    .unwrap_or(Type::new(
+                                                        TypeKind::Unknown,
+                                                        name,
+                                                        current_namespace.clone(),
+                                                        offset,
+                                                    )),
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -597,7 +697,10 @@ impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
                     ));
                 } else if !variants.is_empty() {
                     return Some(Type::new(
-                        TypeKind::Enum(Enum { variants }),
+                        TypeKind::Enum(Enum {
+                            variants,
+                            discriminant_offset,
+                        }),
                         type_name.unwrap_or_else(|| "<unnamed type>".to_string()),
                         current_namespace,
                         offset,
@@ -652,11 +755,12 @@ impl<'debuginfo, 'abbrev, 'unit> UnitInfo<'debuginfo> {
         }
 
         let typ = if let Some(type_attr) = type_attr {
+            dbg!(type_attr.value());
             let mut tree = self
                 .unit
                 .entries_tree(Some(match type_attr.value() {
                     AttributeValue::UnitRef(v) => v,
-                    _ => panic!(),
+                    _ => return (String::new(), None),
                 }))
                 .unwrap();
             let root = tree.root().unwrap();

@@ -76,5 +76,7 @@ fn init() -> ! {
         log0_target::log!("Look what I got: {}", TEST3);
 
         log0_target::log!("Look what I got: {}", TEST7);
+
+        log0_target::log!("Look what I got: {}", TEST6);
     }
 }

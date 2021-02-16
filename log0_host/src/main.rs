@@ -82,6 +82,8 @@ fn main() -> Result<()> {
 
     let type_printers = generate_printers(&bytes).unwrap();
 
+    dbg!(&type_printers);
+
     // Ctrl-C handling
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
