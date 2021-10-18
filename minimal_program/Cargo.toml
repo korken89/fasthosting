@@ -12,14 +12,15 @@ cortex-m-semihosting    = "0.3.3"
 panic-halt              = "0.2.0"
 cortex-m                = "0.6.0"
 #heapless                = "0.5.0"
-
+embedded-hal = "0.2.3"
+nrf52840-hal = "0.10.0"
 
 [dependencies.log0_target]
 path = "../log0_target"
 
-[dependencies.stm32l4xx-hal]
-version = "0.5.0"
-features = ["stm32l4x2", "rt"]
+# [dependencies.stm32l4xx-hal]
+# version = "0.5.0"
+# features = ["stm32l4x2", "rt"]
 
 # this lets you use `cargo fix`!
 [[bin]]
